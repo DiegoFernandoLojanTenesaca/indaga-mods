@@ -1,0 +1,12 @@
+export const ICONS = {
+  previous: '⏴⏴',
+  play: '⏵',
+  pause: '❚❚',
+  stop: '■',
+  next: '⏵⏵',
+  playing: '♪',
+  quieter: '−',
+  louder: '+',
+  themeChosen: '◉',
+  themeOther: '●',
+}

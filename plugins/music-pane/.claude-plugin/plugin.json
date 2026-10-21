@@ -1,0 +1,55 @@
+{
+  "name": "music-pane",
+  "version": "0.6.0",
+  "description": "A music player beside the chat: your albums and YouTube, a search by title, singer or a line of the lyrics, similar songs after each one, the cover, a progress bar and the lyric line being sung. /music opens it.",
+  "author": {
+    "name": "IndagaLab",
+    "url": "https://github.com/DiegoFernandoLojanTenesaca"
+  },
+  "license": "MIT",
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "library": {
+      "type": "string",
+      "title": "Music folder",
+      "description": "A folder with one subfolder per album. A song is an audio file; a .srt (synced) or .txt of the same name, in the album folder or one level below, holds its lyrics; an image in the album folder is its cover.",
+      "default": ""
+    },
+    "channel": {
+      "type": "string",
+      "title": "YouTube channel",
+      "description": "A channel handle (@name) or URL whose playlists show as albums. Needs yt-dlp.",
+      "default": ""
+    },
+    "artist": {
+      "type": "string",
+      "title": "Artist",
+      "description": "The artist of the music folder: searched with its songs, and taken off the front of YouTube titles.",
+      "default": ""
+    },
+    "player": {
+      "type": "string",
+      "title": "ffplay",
+      "description": "The ffplay executable, by name on the PATH or by full path.",
+      "default": "ffplay"
+    },
+    "ffmpeg": {
+      "type": "string",
+      "title": "ffmpeg",
+      "description": "The ffmpeg executable, which makes the small covers.",
+      "default": "ffmpeg"
+    },
+    "ytdlp": {
+      "type": "string",
+      "title": "yt-dlp",
+      "description": "The yt-dlp executable, which searches YouTube and reads its playlists and videos.",
+      "default": "yt-dlp"
+    },
+    "openOnStart": {
+      "type": "boolean",
+      "title": "Open on start",
+      "description": "Open the music pane when a session starts. Where /music does not run (the desktop app and other hosts), this or asking Claude for music opens it.",
+      "default": true
+    }
+  }
+}
