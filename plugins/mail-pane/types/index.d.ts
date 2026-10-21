@@ -11,8 +11,10 @@ export type MailSummary = {
 }
 
 export type MailAttachment = {
+  uri: string
   name: string
   size: number
+  contentType: string
 }
 
 export type MailMessage = {
@@ -29,12 +31,24 @@ export type MailMessage = {
   webLink?: string
 }
 
+export type MailPreview = {
+  name: string
+  text?: string
+  image?: { data: string; mimeType: string }
+}
+
+export type MailSaved = {
+  uri: string
+  folder: string
+  files: string[]
+}
+
 export type MailFilter = 'all' | 'unread'
 
-export type MailBusy = 'list' | 'more' | 'mail'
+export type MailBusy = 'list' | 'more' | 'mail' | 'attachment' | 'save'
 
 export type MailProblem = {
-  key: 'connectorFailed' | 'mailFailed' | 'chatFailed'
+  key: 'connectorFailed' | 'mailFailed' | 'chatFailed' | 'attachmentFailed' | 'saveFailed'
   values?: Record<string, string>
 }
 
@@ -51,6 +65,8 @@ declare module 'claude-code' {
       filter: MailFilter
       message: MailMessage | null
       isThreadShown: boolean
+      preview: MailPreview | null
+      saved: MailSaved | null
       busy: MailBusy | null
       problem: MailProblem | null
       theme: string

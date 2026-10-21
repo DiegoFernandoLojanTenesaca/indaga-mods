@@ -1,13 +1,35 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { MailBusy, MailFilter, MailMessage, MailProblem, MailSummary } from '../types'
-import { bannerSvgOf } from './art'
+import type {
+  MailAttachment,
+  MailBusy,
+  MailFilter,
+  MailMessage,
+  MailPreview,
+  MailProblem,
+  MailSaved,
+  MailSummary,
+} from '../types'
+import { bannerSvgOf, imageSvgOf } from './art'
 import { ICONS } from './icons'
 import { LAYOUT } from './layout'
 import { localeOf, translate } from './locales'
 import type { Locale, MessageKey } from './locales'
-import { isWatched, jsonObjectsOf, messageOf, pageOf, relativeTimeOf, sizeOf, watchListOf } from './mail'
+import {
+  contentOf,
+  dayOf,
+  isImage,
+  isWatched,
+  joinPath,
+  jsonObjectsOf,
+  messageOf,
+  pageOf,
+  relativeTimeOf,
+  safeNameOf,
+  sizeOf,
+  watchListOf,
+} from './mail'
 import { DEFAULT_THEME, PALETTE, THEMES, isTheme } from './palette'
 import type { ThemeName } from './palette'
 
@@ -22,6 +44,10 @@ const SEARCH_TOOL = 'outlook_email_search'
 const READ_TOOL = 'read_resource'
 const MINUTE_MS = 60_000
 const STORE = { theme: 'theme', seenUntil: 'seenUntil' }
+const DOWNLOADS = 'Downloads'
+const WINDOWS = 'Windows_NT'
+const DECODE_SCRIPT = 'base64 --decode < "$0" > "$1"'
+const MARKDOWN_NAME = /\.(md|markdown)$/i
 
 const mails = atom({ plugin: 'mail-pane', key: 'mails' } as const, [] as MailSummary[])
 const nextOffset = atom({ plugin: 'mail-pane', key: 'nextOffset' } as const, null as number | null)
@@ -29,12 +55,16 @@ const query = atom({ plugin: 'mail-pane', key: 'query' } as const, '')
 const filter = atom({ plugin: 'mail-pane', key: 'filter' } as const, 'all' as MailFilter)
 const message = atom({ plugin: 'mail-pane', key: 'message' } as const, null as MailMessage | null)
 const isThreadShown = atom({ plugin: 'mail-pane', key: 'isThreadShown' } as const, false)
+const preview = atom({ plugin: 'mail-pane', key: 'preview' } as const, null as MailPreview | null)
+const saved = atom({ plugin: 'mail-pane', key: 'saved' } as const, null as MailSaved | null)
 const busy = atom({ plugin: 'mail-pane', key: 'busy' } as const, null as MailBusy | null)
 const problem = atom({ plugin: 'mail-pane', key: 'problem' } as const, null as MailProblem | null)
 const theme = atom({ plugin: 'mail-pane', key: 'theme' } as const, DEFAULT_THEME as string)
 const now = atom({ plugin: 'mail-pane', key: 'now' } as const, 0)
 
-type Config = { domain: string; watch: string[]; refreshMs: number; connector: string }
+type Config = { domain: string; watch: string[]; refreshMs: number; connector: string; saveFolder: string }
+
+type Surface = 'terminal' | 'desktop' | 'vscode' | 'mobile'
 
 let locale: Promise<Locale> | undefined
 
@@ -47,6 +77,7 @@ export const configOf = (options: Record<string, unknown>): Config => ({
     (typeof options.refreshMinutes === 'number' && options.refreshMinutes > 0 ? options.refreshMinutes : LAYOUT.refreshMinutes) *
     MINUTE_MS,
   connector: textOption(options.connector, DEFAULT_CONNECTOR),
+  saveFolder: textOption(options.saveFolder),
 })
 
 export const searchArgsOf = (config: Config, words: string, offset: number) => ({
@@ -78,10 +109,15 @@ async function setBusy($: EngineInterface, next: MailBusy | null) {
   await update($, busy, () => next)
 }
 
-async function call($: EngineInterface, config: Config, tool: string, args: Record<string, unknown>) {
+async function callBlocks($: EngineInterface, config: Config, tool: string, args: Record<string, unknown>) {
   const answer = await $.mcp.call(config.connector, tool, args)
   if (answer.isError) throw new Error(tool)
-  return answer.content.flatMap(block => (block.type === 'text' ? [block.text] : [])).join('')
+  return answer.content
+}
+
+async function call($: EngineInterface, config: Config, tool: string, args: Record<string, unknown>) {
+  const blocks = await callBlocks($, config, tool, args)
+  return blocks.flatMap(block => (block.type === 'text' && block.text ? [block.text] : [])).join('')
 }
 
 async function announce($: EngineInterface, config: Config, list: MailSummary[]) {
@@ -121,6 +157,8 @@ async function search($: EngineInterface, config: Config, words: string) {
 
 async function openMail($: EngineInterface, config: Config, mail: MailSummary) {
   await update($, isThreadShown, () => false)
+  await update($, preview, () => null)
+  await setProblem($, null)
   await update($, message, () => ({ ...mail, to: [], cc: [], body: '', thread: '', attachments: [] }))
   await setBusy($, 'mail')
   const text = await call($, config, READ_TOOL, { uri: mail.uri }).catch(() => undefined)
@@ -135,6 +173,7 @@ async function openMail($: EngineInterface, config: Config, mail: MailSummary) {
 
 async function closeMail($: EngineInterface) {
   await update($, message, () => null)
+  await update($, preview, () => null)
   await update($, isThreadShown, () => false)
 }
 
@@ -146,13 +185,102 @@ async function chooseFilter($: EngineInterface, next: MailFilter) {
   await update($, filter, () => next)
 }
 
-async function passToChat($: EngineInterface, mail: MailMessage, surface: 'terminal' | 'desktop' | 'vscode' | 'mobile') {
+async function readAttachment($: EngineInterface, config: Config, attachment: MailAttachment) {
+  return contentOf(await callBlocks($, config, READ_TOOL, { uri: attachment.uri }))
+}
+
+async function viewAttachment($: EngineInterface, config: Config, attachment: MailAttachment) {
+  await setProblem($, null)
+  await setBusy($, 'attachment')
+  const content = await readAttachment($, config, attachment).catch(() => undefined)
+  await setBusy($, null)
+  if (!content) return setProblem($, { key: 'attachmentFailed', values: { name: attachment.name } })
+  const mimeType = 'data' in content ? content.mimeType || attachment.contentType : ''
+  await update($, preview, (): MailPreview => ({
+    name: attachment.name,
+    text: 'text' in content ? content.text : undefined,
+    image: 'data' in content && isImage(mimeType) ? { data: content.data, mimeType } : undefined,
+  }))
+}
+
+async function closePreview($: EngineInterface) {
+  await update($, preview, () => null)
+}
+
+async function tempFolderOf($: EngineInterface) {
+  return (await $.env.get('TEMP')) ?? (await $.env.get('TMPDIR')) ?? '/tmp'
+}
+
+async function saveRootOf($: EngineInterface, config: Config, current: Locale) {
+  if (config.saveFolder) return config.saveFolder
+  const home = (await $.env.get('USERPROFILE')) ?? (await $.env.get('HOME')) ?? (await tempFolderOf($))
+  return joinPath(joinPath(home, DOWNLOADS), translate(current, 'saveFolderName'))
+}
+
+async function writeBytes($: EngineInterface, base64: string, target: string) {
+  const encoded = joinPath(await tempFolderOf($), `mail-pane-${safeNameOf(target).slice(-LAYOUT.tempNameLength)}.b64`)
+  await $.fs.write(encoded, base64)
+  const isWindows = (await $.env.get('OS')) === WINDOWS
+  const argv = isWindows ? ['certutil', '-f', '-decode', encoded, target] : ['sh', '-c', DECODE_SCRIPT, encoded, target]
+  const done = await $.process.run(argv, { timeoutMs: LAYOUT.decodeTimeoutMs })
+  if (done.exitCode !== 0) throw new Error(target)
+}
+
+async function saveMail($: EngineInterface, config: Config, mail: MailMessage): Promise<MailSaved> {
+  const known = await read($, saved)
+  if (known?.uri === mail.uri) return known
   const current = await localeFor($)
+  const t = (key: MessageKey, values?: Record<string, string>) => translate(current, key, values)
+  const subject = safeNameOf(mail.subject) || t('noSubject')
+  const folder = joinPath(await saveRootOf($, config, current), `${dayOf(mail.receivedMs)} ${subject}`)
+  await setBusy($, 'save')
+  const mailFile = t('mailFileName')
+  await $.fs.write(
+    joinPath(folder, mailFile),
+    t('mailFile', {
+      subject: mail.subject || t('noSubject'),
+      who: `${mail.fromName} <${mail.from}>`,
+      to: mail.to.join(', '),
+      cc: mail.cc.join(', '),
+      date: new Date(mail.receivedMs).toISOString(),
+      body: mail.thread,
+    }),
+  )
+  const files = [mailFile]
+  const failed: string[] = []
+  for (const attachment of mail.attachments) {
+    const name = safeNameOf(attachment.name) || attachment.uri.slice(-LAYOUT.tempNameLength)
+    const target = joinPath(folder, name)
+    const written = await readAttachment($, config, attachment)
+      .then(async content => {
+        if (!content) throw new Error(name)
+        if ('text' in content) await $.fs.write(target, content.text)
+        else await writeBytes($, content.data, target)
+      })
+      .then(
+        () => true,
+        () => false,
+      )
+    if (written) files.push(name)
+    else failed.push(attachment.name)
+  }
+  await setBusy($, null)
+  const result = { uri: mail.uri, folder, files }
+  await update($, saved, () => result)
+  await setProblem($, failed.length > 0 ? { key: 'saveFailed', values: { names: failed.join(', ') } } : null)
+  return result
+}
+
+async function passToChat($: EngineInterface, config: Config, mail: MailMessage, surface: Surface) {
+  const current = await localeFor($)
+  const kept = await saveMail($, config, mail).catch(() => undefined)
   const text = translate(current, 'chatText', {
     who: `${mail.fromName} <${mail.from}>`,
     when: relativeTimeOf(current, mail.receivedMs, await $.clock.now()),
     subject: mail.subject,
     body: mail.body,
+    folder: kept?.folder ?? '',
+    files: (kept?.files ?? []).map(name => `- ${name}`).join('\n'),
   })
   const filled = await $.prompt.fill({ text, mode: 'insert' }).catch(() => undefined)
   if (filled?.isFilled) return
@@ -171,8 +299,8 @@ async function chooseTheme($: EngineInterface, name: string) {
 }
 
 async function loadTheme($: EngineInterface) {
-  const saved = await $.store.get(STORE.theme)
-  if (isTheme(saved)) await update($, theme, () => saved)
+  const kept = await $.store.get(STORE.theme)
+  if (isTheme(kept)) await update($, theme, () => kept)
 }
 
 export const register: Register = (on, options) => {
@@ -212,7 +340,7 @@ export const register: Register = (on, options) => {
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const { Box, Button, Link, Markdown, Text } = $.ui.resolve(e)
+    const { Box, Button, Code, Link, Markdown, Text } = $.ui.resolve(e)
     const current = await localeFor($)
     const t = (key: MessageKey, values?: Record<string, string>) => translate(current, key, values)
     const heading = (key: MessageKey) => (
@@ -220,13 +348,15 @@ export const register: Register = (on, options) => {
         {t(key).toLocaleUpperCase(current)}
       </Text>
     )
-    const [list, more, words, chosen, opened, isWhole, loading, issue, painted, nowMs] = await Promise.all([
+    const [list, more, words, chosen, opened, isWhole, shownFile, kept, loading, issue, painted, nowMs] = await Promise.all([
       read($, mails),
       read($, nextOffset),
       read($, query),
       read($, filter),
       read($, message),
       read($, isThreadShown),
+      read($, preview),
+      read($, saved),
       read($, busy),
       read($, problem),
       read($, theme),
@@ -241,6 +371,7 @@ export const register: Register = (on, options) => {
       source: config.domain || t('inbox'),
       unread: t('unreadCount', { count: String(unread.length) }),
     })
+    const problemLine = issue && <Text color={PALETTE.problem}>{t(issue.key, issue.values)}</Text>
 
     const banner = () => {
       if (e.surface === 'terminal') {
@@ -255,6 +386,14 @@ export const register: Register = (on, options) => {
       }
       const { Svg } = $.ui.resolve(e)
       return <Svg source={bannerSvgOf(t('title'), subtitle, accent)} alt={`${t('title')} · ${subtitle}`} />
+    }
+
+    const image = (file: MailPreview) => {
+      if (!file.image) return null
+      const source = imageSvgOf(file.image.data, file.image.mimeType)
+      if (e.surface === 'terminal' || source.length > LAYOUT.svgCharacters) return <Text dimColor>{t('tooBig')}</Text>
+      const { Svg } = $.ui.resolve(e)
+      return <Svg source={source} alt={file.name} />
     }
 
     const searchField = () => {
@@ -294,42 +433,71 @@ export const register: Register = (on, options) => {
       </Box>
     )
 
+    if (opened && shownFile) {
+      const text = (shownFile.text ?? '').slice(0, LAYOUT.threadCharacters)
+      return (
+        <Box flexDirection="column" gap={LAYOUT.sectionGap}>
+          <Button key="closePreview" label={`${ICONS.back} ${t('closePreview')}`} onPress={() => closePreview($)} />
+          <Text bold>{shownFile.name}</Text>
+          {shownFile.image
+            ? image(shownFile)
+            : text
+              ? MARKDOWN_NAME.test(shownFile.name)
+                ? <Markdown key="file" text={text} />
+                : <Code key="file" source={text} path={shownFile.name} />
+              : <Text dimColor>{t('noPreview')}</Text>}
+        </Box>
+      )
+    }
+
     if (opened) {
       const isReading = loading === 'mail'
       const text = (isWhole ? opened.thread : opened.body).slice(0, LAYOUT.threadCharacters)
+      const isSaved = kept?.uri === opened.uri
       return (
         <Box flexDirection="column" gap={LAYOUT.sectionGap}>
           <Box flexDirection="row" flexWrap="wrap" alignItems="center" gap={LAYOUT.buttonGap}>
             <Button key="back" label={`${ICONS.back} ${t('back')}`} onPress={() => closeMail($)} />
             {!isReading && (
-              <Button key="toChat" onPress={() => passToChat($, opened, e.surface)}>
+              <Button key="toChat" onPress={() => passToChat($, config, opened, e.surface)}>
                 <Text bold color={accent}>
                   {t('toChat')}
                 </Text>
               </Button>
             )}
+            {!isReading && (
+              <Button key="save" label={loading === 'save' ? t('saving') : t('save')} onPress={() => saveMail($, config, opened)} />
+            )}
             {opened.webLink && <Link href={opened.webLink} label={t('outlook')} />}
           </Box>
-          {issue && <Text color={PALETTE.problem}>{t(issue.key, issue.values)}</Text>}
+          {problemLine}
+          {isSaved && <Text dimColor>{t('savedIn', { folder: kept.folder })}</Text>}
           <Box flexDirection="column">
             <Text bold>{opened.subject}</Text>
             <Text dimColor>{t('fromLine', { who: `${opened.fromName} <${opened.from}>`, when: when(opened.receivedMs) })}</Text>
             {opened.to.length > 0 && <Text dimColor>{t('toLine', { who: opened.to.join(', ') })}</Text>}
             {opened.cc.length > 0 && <Text dimColor>{t('ccLine', { who: opened.cc.join(', ') })}</Text>}
           </Box>
+          {opened.attachments.length > 0 && (
+            <Box flexDirection="column">
+              {heading('attachmentsHeading')}
+              {opened.attachments.map(one => (
+                <Box key={`attachment:${one.uri}`} flexDirection="row" alignItems="center" gap={LAYOUT.buttonGap}>
+                  <Button key={`view:${one.uri}`} plain onPress={() => viewAttachment($, config, one)}>
+                    <Text color={accent}>{t('view')}</Text>
+                  </Button>
+                  <Text>{one.name}</Text>
+                  <Text dimColor>{sizeOf(current, one.size)}</Text>
+                </Box>
+              ))}
+              {loading === 'attachment' && <Text dimColor>{t('loading')}</Text>}
+            </Box>
+          )}
           {isReading ? <Text dimColor>{t('loading')}</Text> : <Markdown key="body" text={text || t('noBody')} />}
           {!isReading && opened.thread !== opened.body && (
             <Button key="thread" plain onPress={() => toggleThread($)}>
               <Text color={accent}>{isWhole ? t('hideThread') : t('showThread')}</Text>
             </Button>
-          )}
-          {opened.attachments.length > 0 && (
-            <Box flexDirection="column">
-              {heading('attachmentsHeading')}
-              {opened.attachments.map(one => (
-                <Text dimColor>{`${one.name} · ${sizeOf(current, one.size)}`}</Text>
-              ))}
-            </Box>
           )}
           {themes}
         </Box>
@@ -366,7 +534,7 @@ export const register: Register = (on, options) => {
           </Button>
         </Box>
         {loading === 'list' && <Text dimColor>{t('loading')}</Text>}
-        {issue && <Text color={PALETTE.problem}>{t(issue.key, issue.values)}</Text>}
+        {problemLine}
         {shown.length > 0 ? (
           <Box flexDirection="column">{shown.map(row)}</Box>
         ) : (

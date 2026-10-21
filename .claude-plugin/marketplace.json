@@ -20,8 +20,8 @@
     },
     {
       "name": "mail-pane",
-      "description": "Your latest mail beside the chat, through the Microsoft 365 connector: from one sender domain or the whole inbox, read in the pane, passed to the chat, with a toast when new mail comes in. /mail opens it.",
-      "version": "0.1.0",
+      "description": "Your latest mail beside the chat, through the Microsoft 365 connector: read each mail and its attachments in the pane, save them to a folder and pass them to the chat to work on, with a toast when new mail comes in. /mail opens it.",
+      "version": "0.2.0",
       "source": "./plugins/mail-pane",
       "category": "Productivity",
       "tags": [

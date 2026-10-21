@@ -6,6 +6,11 @@ const SVG = 'http://www.w3.org/2000/svg'
 const escaped = (text: string) =>
   text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 
+export function imageSvgOf(base64: string, mimeType: string) {
+  const { previewWidth: width, previewHeight: height } = LAYOUT
+  return `<svg xmlns="${SVG}" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><image href="data:${escaped(mimeType)};base64,${base64}" width="${width}" height="${height}" preserveAspectRatio="xMidYMid meet"/></svg>`
+}
+
 export function bannerSvgOf(title: string, subtitle: string, accent: string) {
   const look = LAYOUT.banner
   const ink = PALETTE.bannerInk

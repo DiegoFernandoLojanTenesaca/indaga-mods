@@ -5,6 +5,11 @@ export const LAYOUT = {
   refreshMinutes: 5,
   toastsAtOnce: 3,
   threadCharacters: 40_000,
+  svgCharacters: 130_000,
+  previewWidth: 800,
+  previewHeight: 600,
+  tempNameLength: 60,
+  decodeTimeoutMs: 60_000,
   banner: {
     width: 1000,
     height: 220,

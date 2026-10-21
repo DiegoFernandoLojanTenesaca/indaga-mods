@@ -22,6 +22,9 @@ const MAILTO = /^mailto:/i
 const LOOSE_ITEM = /^(- .*)\n\n(?=- )/gm
 const SOFT_BREAK = /([^\n])\n(?!\n|- )/g
 const HARD_BREAK = '  \n'
+const UNSAFE_NAME = /[<>:"/\\|?*\u0000-\u001f]/g
+const NAME_LENGTH = 80
+const DAY_LENGTH = 10
 const UNITS: [Intl.RelativeTimeFormatUnit, number][] = [
   ['year', 31_536_000_000],
   ['month', 2_592_000_000],
@@ -157,7 +160,9 @@ export function messageOf(raw: Raw, uri: string): MailMessage {
   const attachments: MailAttachment[] = Array.isArray(raw.attachments)
     ? raw.attachments.flatMap(item => {
         const one = item as Raw
-        return one.isInline === true || !textOf(one.name) ? [] : [{ name: textOf(one.name), size: Number(one.size) || 0 }]
+        return one.isInline === true || !textOf(one.name) || !textOf(one.uri)
+          ? []
+          : [{ uri: textOf(one.uri), name: textOf(one.name), size: Number(one.size) || 0, contentType: textOf(one.contentType) }]
       })
     : []
   return {
@@ -174,6 +179,34 @@ export function messageOf(raw: Raw, uri: string): MailMessage {
     webLink: textOf(raw.webLink) || undefined,
   }
 }
+
+export type AttachmentContent = { data: string; mimeType: string } | { text: string }
+
+export function contentOf(blocks: readonly Record<string, unknown>[]): AttachmentContent | undefined {
+  for (const block of blocks) {
+    const resource = (block.resource ?? {}) as Raw
+    const data = textOf(block.data) || textOf(resource.blob)
+    const mimeType = textOf(block.mimeType) || textOf(resource.mimeType)
+    if (data) return { data, mimeType }
+  }
+  const text = blocks.map(block => textOf(block.text) || textOf(((block.resource ?? {}) as Raw).text)).join('')
+  return text ? { text } : undefined
+}
+
+export const isImage = (mimeType: string) => mimeType.toLowerCase().startsWith('image/')
+
+export const safeNameOf = (text: string) =>
+  text
+    .replace(UNSAFE_NAME, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, NAME_LENGTH)
+    .replace(/[. ]+$/, '')
+
+export const dayOf = (receivedMs: number) => new Date(receivedMs).toISOString().slice(0, DAY_LENGTH)
+
+export const joinPath = (dir: string, name: string) =>
+  `${dir.replace(/[\\/]+$/, '')}${dir.includes('\\') ? '\\' : '/'}${name}`
 
 export const watchListOf = (text: string) =>
   text

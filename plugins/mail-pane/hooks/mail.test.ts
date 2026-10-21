@@ -1,13 +1,18 @@
 import { describe, expect, test } from 'claude-code/testing'
 
 import {
+  contentOf,
+  dayOf,
+  isImage,
   isWatched,
+  joinPath,
   jsonObjectsOf,
   markdownOf,
   messageOf,
   newestPartOf,
   pageOf,
   relativeTimeOf,
+  safeNameOf,
   sizeOf,
   summaryOf,
   watchListOf,
@@ -73,8 +78,9 @@ describe('mail', () => {
         ccRecipients: [{ name: '', address: 'team@example.com' }],
         receivedDateTime: '2026-10-21T10:00:00.000Z',
         attachments: [
-          { name: 'image.png', size: 900, isInline: true },
-          { name: 'plan.md', size: 12_288, isInline: false },
+          { uri: 'mail:///a/1', name: 'image.png', size: 900, contentType: 'image/png', isInline: true },
+          { uri: 'mail:///a/2', name: 'plan.md', size: 12_288, contentType: 'text/markdown', isInline: false },
+          { name: 'no-uri.txt', size: 10, isInline: false },
         ],
         webLink: 'https://outlook.example/plan',
       },
@@ -89,9 +95,28 @@ describe('mail', () => {
       cc: ['team@example.com'],
       body: 'Short answer',
       thread: 'Short answer  \nLong thread',
-      attachments: [{ name: 'plan.md', size: 12_288 }],
+      attachments: [{ uri: 'mail:///a/2', name: 'plan.md', size: 12_288, contentType: 'text/markdown' }],
     })
     expect(messageOf({ body: { contentType: 'text', content: `plain${RETURN}\ntext` } }, 'x').body).toBe('plain\ntext')
+  })
+
+  test('reads an attachment as text or as bytes', () => {
+    expect(contentOf([{ type: 'text', text: '# Notes' }])).toEqual({ text: '# Notes' })
+    expect(contentOf([{ type: 'image', data: 'UE5H', mimeType: 'image/png' }])).toEqual({ data: 'UE5H', mimeType: 'image/png' })
+    expect(contentOf([{ type: 'resource', resource: { uri: 'x', mimeType: 'application/pdf', blob: 'JVBE' } }])).toEqual({ data: 'JVBE', mimeType: 'application/pdf' })
+    expect(contentOf([{ type: 'resource', resource: { uri: 'x', text: 'plain' } }])).toEqual({ text: 'plain' })
+    expect(contentOf([])).toBeUndefined()
+    expect(isImage('image/jpeg')).toBe(true)
+    expect(isImage('application/pdf')).toBe(false)
+  })
+
+  test('names folders and files safely', () => {
+    expect(safeNameOf('RE: Plan / Q4 <final>?')).toBe('RE Plan Q4 final')
+    expect(safeNameOf('notes.')).toBe('notes')
+    expect(safeNameOf('a'.repeat(200))).toHaveLength(80)
+    expect(dayOf(Date.UTC(2026, 9, 21, 12))).toBe('2026-10-21')
+    expect(joinPath('C:\\Users\\me\\', 'Mail')).toBe('C:\\Users\\me\\Mail')
+    expect(joinPath('/home/me', 'Mail')).toBe('/home/me/Mail')
   })
 
   test('watches senders by address, domain or name', () => {
