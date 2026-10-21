@@ -70,9 +70,32 @@ const MR_DETAIL = {
   reviewers: [{ username: 'ana' }],
 }
 
+const repo = (path: string, open: number, isArchived = false) => ({ nameWithOwner: path, isArchived, pullRequests: { totalCount: open } })
+const REPOS = [repo('acme/site', 0), repo('acme/app', 2), repo('acme/old', 1, true)]
+const CONTRIBUTED = [repo('lab/tool', 1), repo('acme/app', 2)]
+const GITLAB_PROJECTS = [{ id: 77, path_with_namespace: 'team/api' }]
+const OTHER = pr(30, 'eva', 5, { title: 'Translate the menu' })
+const ASKED_MR_URL = 'https://gitlab.example/team/api/-/merge_requests/8'
+const ASKED_MR = {
+  ...MR,
+  iid: 8,
+  title: 'Clean the logs',
+  draft: false,
+  author: { username: 'ana' },
+  reviewers: [{ username: 'me' }],
+  assignees: [],
+  references: { full: 'team/api!8' },
+  web_url: ASKED_MR_URL,
+}
+const MR_DETAIL_PATH = /^projects\/\d+\/merge_requests\/\d+$/
+
+type Searches = { review: unknown[]; open: unknown[]; closed: unknown[] }
+
 type World = {
-  github: { review: unknown[]; open: unknown[]; closed: unknown[] } | 'down'
+  github: Searches | 'down'
   gitlab: Record<'review' | 'mine' | 'assigned' | 'recent', unknown[]> | 'down'
+  githubProject?: Searches | 'down'
+  gitlabProject?: unknown[]
   fills?: boolean
 }
 
@@ -111,13 +134,22 @@ function engine(on: any, world: World) {
   on('process.run', (_$: any, e: any) => {
     const argv: string[] = e.argv
     runs.push(argv)
-    if (argv[0] === 'gh' && argv[2] === 'graphql') {
-      return world.github === 'down' ? down : ok({ data: { viewer: { login: 'me' }, ...Object.fromEntries(Object.entries(world.github).map(([alias, nodes]) => [alias, { nodes }])) } })
+    const path = argv[2] ?? ''
+    if (argv[0] === 'gh' && path === 'graphql') {
+      const isProject = argv.some(arg => arg.startsWith('open=repo:'))
+      const searches = isProject ? (world.githubProject ?? 'down') : world.github
+      if (searches === 'down') return down
+      const viewer = isProject ? { login: 'me' } : { login: 'me', repositories: { nodes: REPOS }, contributed: { nodes: CONTRIBUTED } }
+      return ok({ data: { viewer, ...Object.fromEntries(Object.entries(searches).map(([alias, nodes]) => [alias, { nodes }])) } })
     }
     if (argv[0] === 'gh' && argv[1] === 'pr') return ok(PR_DETAIL)
-    if (argv[0] === 'glab' && argv[2]?.startsWith('projects/')) return ok(MR_DETAIL)
-    if (argv[0] === 'glab') return world.gitlab === 'down' ? down : ok(world.gitlab[gitlabListOf(argv[2] ?? '')])
-    return down
+    if (argv[0] !== 'glab') return down
+    if (path === 'user') return ok({ username: 'me' })
+    if (path.startsWith('projects?')) return world.gitlab === 'down' ? down : ok(GITLAB_PROJECTS)
+    if (MR_DETAIL_PATH.test(path)) return ok(MR_DETAIL)
+    if (path.startsWith('projects/77/merge_requests?state=opened')) return ok(world.gitlabProject ?? [])
+    if (path.startsWith('projects/77/merge_requests?state=all')) return ok([])
+    return world.gitlab === 'down' ? down : ok(world.gitlab[gitlabListOf(path)])
   })
   return { clock, runs, toasts, fills, copies, opened, stored }
 }
@@ -126,6 +158,8 @@ const WORLD = (): World => ({
   github: { review: [ASKED], open: [ASKED, MINE], closed: [MERGED] },
   gitlab: { review: [], mine: [], assigned: [MR], recent: [] },
 })
+
+const picked = async (pane: Mounted<'desktop'>) => (await pane.find({ key: 'project' })) as { props: { value: string; options: unknown[] } } | undefined
 
 async function startPane($: any, surface: 'terminal' | 'desktop' = 'desktop') {
   await $.session.start({ surface, isInteractive: true, cwd: '/work' })
@@ -146,12 +180,15 @@ describe('review-pane', () => {
       const { runs } = engine(on, WORLD())
       const pane = await startPane($, surface)
       await until(() => pane.find({ key: `item:${MR_URL}` }))
-      expect(runs.find(argv => argv[2] === 'graphql')).toEqual(expect.arrayContaining(['-f', 'review=is:pr is:open archived:false review-requested:@me', '-F', 'first=30']))
+      expect(runs.find(argv => argv[2] === 'graphql')).toEqual(
+        expect.arrayContaining(['-f', 'review=is:pr archived:false is:open review-requested:@me', '-F', 'first=30', '-F', 'repos=30']),
+      )
       expect(runs.filter(argv => argv[0] === 'glab').map(argv => argv[2])).toEqual([
         'merge_requests?scope=reviews_for_me&state=opened&per_page=50',
         'merge_requests?scope=created_by_me&state=opened&per_page=50',
         'merge_requests?scope=assigned_to_me&state=opened&per_page=50',
         'merge_requests?scope=created_by_me&state=all&order_by=updated_at&per_page=10',
+        'projects?membership=true&archived=false&simple=true&order_by=last_activity_at&per_page=30',
       ])
       expect(await pane.find({ key: `item:${prUrl(12)}`, text: /acme\/app#12.*Fix the cache.*by ana · 1 hour ago · review pending/ })).toBeDefined()
       expect(await pane.find({ key: `item:${prUrl(9)}`, text: new RegExp(`${ICONS.failing}.*Add the export`) })).toBeDefined()
@@ -259,6 +296,68 @@ describe('review-pane', () => {
     await until(() => pane.find({ key: `item:${prUrl(12)}` }))
     expect(runs.some(argv => argv[0] === 'glab')).toBe(false)
     expect(await pane.find({ type: 'Text', text: 'GITLAB' })).toBeUndefined()
+  })
+
+  test('offers the projects of both accounts, the ones with open requests first', async ($, on) => {
+    engine(on, WORLD())
+    const pane = await startPane($)
+    await until(async () => (await picked(pane))?.props.options.length === 5)
+    expect((await picked(pane))?.props).toMatchObject({
+      label: 'Project',
+      value: 'all',
+      options: [
+        { value: 'all', label: 'Everything that involves you' },
+        { value: 'github:acme/app', label: 'GitHub · acme/app · 2 open' },
+        { value: 'github:lab/tool', label: 'GitHub · lab/tool · 1 open' },
+        { value: 'github:acme/site', label: 'GitHub · acme/site' },
+        { value: 'gitlab:77', label: 'GitLab · team/api' },
+      ],
+    })
+  })
+
+  test('shows every request of the chosen GitHub project, keeps the choice and goes back to all', async ($, on) => {
+    const { runs, stored } = engine(on, { ...WORLD(), githubProject: { review: [ASKED], open: [ASKED, MINE, OTHER], closed: [] } })
+    const pane = await startPane($)
+    await until(async () => (await picked(pane))?.props.options.length === 5)
+    await pane.select({ key: 'project', value: 'github:acme/app' })
+    const asked = runs.at(-1) ?? []
+    expect(asked).toEqual(expect.arrayContaining(['-f', 'open=repo:acme/app is:pr is:open', '-f', 'closed=repo:acme/app is:pr is:closed sort:updated-desc']))
+    expect(asked.includes('repos=30')).toBe(false)
+    expect(await pane.find({ key: `item:${prUrl(30)}`, text: /acme\/app#30.*Translate the menu.*by eva/ })).toBeDefined()
+    for (const label of ['GITHUB · ACME/APP', 'Asked to review', 'Yours', 'From others']) {
+      expect(await pane.find({ type: 'Text', text: label })).toBeDefined()
+    }
+    expect(await pane.find({ type: 'Text', text: 'GITLAB' })).toBeUndefined()
+    expect(await pane.find({ type: 'Svg' })).toMatchObject({ props: { alt: 'Reviews · acme/app · 3 open' } })
+    expect(stored.project).toEqual({ key: 'github:acme/app', host: 'github', path: 'acme/app', openCount: 2 })
+    await pane.select({ key: 'project', value: 'all' })
+    expect(stored.project).toBeNull()
+    expect(await pane.find({ type: 'Text', text: 'GITLAB' })).toBeDefined()
+    expect(await pane.find({ key: `item:${prUrl(30)}` })).toBeUndefined()
+  })
+
+  test('shows the merge requests of the chosen GitLab project by what they ask of you', async ($, on) => {
+    const { runs } = engine(on, { ...WORLD(), gitlabProject: [MR, ASKED_MR] })
+    const pane = await startPane($)
+    await until(async () => (await picked(pane))?.props.options.length === 5)
+    await pane.select({ key: 'project', value: 'gitlab:77' })
+    expect(runs.map(argv => argv[2])).toEqual(
+      expect.arrayContaining(['user', 'projects/77/merge_requests?state=opened&per_page=50', 'projects/77/merge_requests?state=all&order_by=updated_at&per_page=10']),
+    )
+    expect(await pane.find({ key: `item:${ASKED_MR_URL}`, text: /team\/api!8.*Clean the logs.*by ana/ })).toBeDefined()
+    expect(await pane.find({ type: 'Text', text: 'Clean the logs' })).toMatchObject({ props: { bold: true } })
+    expect(await pane.find({ type: 'Text', text: 'From others' })).toBeDefined()
+    expect(await pane.find({ type: 'Text', text: 'GITLAB · TEAM/API' })).toBeDefined()
+  })
+
+  test('opens the project chosen last time, and says when it cannot be read', async ($, on) => {
+    const { stored, runs } = engine(on, { ...WORLD(), githubProject: 'down' })
+    stored.project = { key: 'github:acme/app', host: 'github', path: 'acme/app' }
+    const pane = await startPane($)
+    await until(() => pane.find({ type: 'Text', text: 'This project could not be read.' }))
+    expect(await pane.find({ type: 'Text', text: 'This project could not be read.' })).toBeDefined()
+    expect((await picked(pane))?.props.value).toBe('github:acme/app')
+    expect(runs.some(argv => argv.includes('open=repo:acme/app is:pr is:open'))).toBe(true)
   })
 
   test('picks a theme from its dots and keeps it', async ($, on) => {

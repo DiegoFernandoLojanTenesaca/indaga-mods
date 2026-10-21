@@ -4,8 +4,14 @@ import {
   diffCommandOf,
   githubDetailOf,
   githubItemsOf,
+  githubProjectsOf,
+  githubSearchesOf,
   gitlabDetailOf,
   gitlabItemsOf,
+  gitlabLoginOf,
+  gitlabProjectItemsOf,
+  gitlabProjectsOf,
+  projectOf,
   referenceOf,
   relativeTimeOf,
   seenAfter,
@@ -151,6 +157,58 @@ describe('reviews', () => {
       reviewers: [{ who: 'ana', decision: 'none' }],
     })
     expect(gitlabDetailOf(JSON.stringify({ changes_count: null }), 'k', 'Pipeline').checks).toEqual([])
+  })
+
+  test('searches what involves you, or every request of one project', () => {
+    expect(githubSearchesOf()).toEqual({
+      review: 'is:pr archived:false is:open review-requested:@me',
+      open: 'is:pr archived:false is:open involves:@me',
+      closed: 'is:pr archived:false is:closed involves:@me sort:updated-desc',
+    })
+    expect(githubSearchesOf('acme/app')).toEqual({
+      review: 'repo:acme/app is:pr is:open review-requested:@me',
+      open: 'repo:acme/app is:pr is:open',
+      closed: 'repo:acme/app is:pr is:closed sort:updated-desc',
+    })
+    const answer = { data: { viewer: { login: 'me' }, review: { nodes: [] }, open: { nodes: [pr(1, 'me'), pr(2, 'ana')] }, closed: { nodes: [] } } }
+    expect(githubItemsOf(JSON.stringify(answer), 'others').map(item => item.role)).toEqual(['mine', 'others'])
+  })
+
+  test('lists the projects to choose from', () => {
+    const repo = (path: string, open: number, isArchived = false) => ({ nameWithOwner: path, isArchived, pullRequests: { totalCount: open } })
+    const answer = {
+      data: { viewer: { repositories: { nodes: [repo('acme/site', 0), repo('acme/app', 2), repo('acme/old', 4, true)] }, contributed: { nodes: [repo('lab/tool', 1), repo('acme/app', 2)] } } },
+    }
+    expect(githubProjectsOf(JSON.stringify(answer))).toEqual([
+      { key: 'github:acme/app', host: 'github', path: 'acme/app', openCount: 2 },
+      { key: 'github:lab/tool', host: 'github', path: 'lab/tool', openCount: 1 },
+      { key: 'github:acme/site', host: 'github', path: 'acme/site', openCount: 0 },
+    ])
+    expect(gitlabProjectsOf(JSON.stringify([{ id: 77, path_with_namespace: 'team/api' }, { id: 0, path_with_namespace: 'broken' }]))).toEqual([
+      { key: 'gitlab:77', host: 'gitlab', path: 'team/api', id: 77 },
+    ])
+    expect(gitlabLoginOf(JSON.stringify({ id: 1, username: 'me' }))).toBe('me')
+    expect(projectOf({ key: 'gitlab:77', host: 'gitlab', path: 'team/api', id: 77 })).toEqual({ key: 'gitlab:77', host: 'gitlab', path: 'team/api', id: 77 })
+    expect(projectOf({ key: 'gitlab:77', host: 'gitlab', path: 'team/api' })).toBeUndefined()
+    expect(projectOf({ key: 'x', host: 'bitbucket', path: 'a/b' })).toBeUndefined()
+    expect(projectOf(null)).toBeUndefined()
+  })
+
+  test('tells what each merge request of a project asks of you', () => {
+    const open = [
+      mr(1, { reviewers: [{ username: 'me' }] }),
+      mr(2, { author: { username: 'me' } }),
+      mr(3, { assignees: [{ username: 'me' }] }),
+      mr(4),
+    ]
+    const closed = [mr(5, { state: 'merged' }), mr(4)]
+    expect(gitlabProjectItemsOf([JSON.stringify(open), JSON.stringify(closed)], 'me').map(item => [item.number, item.role])).toEqual([
+      [1, 'review'],
+      [2, 'mine'],
+      [3, 'assigned'],
+      [4, 'others'],
+      [5, 'recent'],
+    ])
   })
 
   test('names a request and the command that shows its changes', () => {

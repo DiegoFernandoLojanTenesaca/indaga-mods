@@ -1,6 +1,6 @@
 # review-pane
 
-Your pull requests and merge requests in a pane beside the chat: the GitHub and GitLab ones that wait for your review, yours, the ones assigned to you and the ones you take part in, each with its checks, a toast when someone asks for your review, and one press to review one in the chat.
+Your pull requests and merge requests in a pane beside the chat: the GitHub and GitLab ones that wait for your review, yours, the ones assigned to you and the ones you take part in, or every one of a project you pick, each with its checks, a toast when someone asks for your review, and one press to review one in the chat.
 
 ## Install
 
@@ -35,6 +35,8 @@ It reads GitHub with the [GitHub CLI](https://cli.github.com) and GitLab with th
 
 A banner in the theme color says how many requests wait for your review and how many are open. Under it, one section per host, each in groups: asked to review, yours, assigned to you, you take part, and the last few closed. A row shows the check state (✓ passed, ✗ failed, ● running), the repository and number, the title, who opened it, how long ago it changed, and whether it is a draft, approved, waiting for review, with changes requested or with conflicts.
 
+Project, under the banner, narrows the pane to one repository or project: the GitHub repositories you own, collaborate on or contributed to (the ones with open pull requests first, with their count) and the GitLab projects you are a member of. A chosen project shows every open request in it, not only yours, grouped by what each asks of you (to review, yours, assigned, from others), and its last few closed; the choice is kept for the next session, and Everything that involves you goes back. The review toasts keep watching everything meanwhile.
+
 A press opens one: its branches, the lines added and removed, its checks (the failing first, each a link to its run), its reviewers and its description. Review in the chat puts the request in the prompt box with the command that shows its changes (`gh pr diff`, `glab mr diff`), so the session can read them and review it; where the prompt cannot be filled it copies the text instead. Open in GitHub or GitLab opens it on the web.
 
-GitHub is read with one GraphQL search (`review-requested:@me`, `involves:@me`); GitLab with the `reviews_for_me`, `created_by_me` and `assigned_to_me` scopes, never every merge request of the instance. A toast names whoever asks for your review; the first look after the mod starts only remembers what is there. The color dots at the bottom pick the theme, kept for the next session.
+GitHub is read with one GraphQL call (`review-requested:@me`, `involves:@me` and your repositories; `repo:<owner>/<name>` for a chosen one); GitLab with the `reviews_for_me`, `created_by_me` and `assigned_to_me` scopes and the projects you are a member of, never every merge request of the instance. A toast names whoever asks for your review; the first look after the mod starts only remembers what is there. The color dots at the bottom pick the theme, kept for the next session.

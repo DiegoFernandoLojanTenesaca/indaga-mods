@@ -4,6 +4,7 @@ import type {
   ReviewDecision,
   ReviewDetail,
   ReviewItem,
+  ReviewProject,
   ReviewReviewer,
   ReviewRole,
   ReviewState,
@@ -12,27 +13,54 @@ import { LAYOUT } from './layout'
 
 type Raw = Record<string, unknown>
 
-export const ROLES: ReviewRole[] = ['review', 'mine', 'assigned', 'involved', 'recent']
+export const ROLES: ReviewRole[] = ['review', 'mine', 'assigned', 'involved', 'others', 'recent']
 
-export const GITHUB_QUERY = [
-  'query($review: String!, $open: String!, $closed: String!, $first: Int!, $recent: Int!) {',
-  'viewer { login }',
+const GITHUB_SEARCH_FIELDS = [
   'review: search(type: ISSUE, query: $review, first: $first) { nodes { ...pr } }',
   'open: search(type: ISSUE, query: $open, first: $first) { nodes { ...pr } }',
   'closed: search(type: ISSUE, query: $closed, first: $recent) { nodes { ...pr } }',
-  '}',
+]
+const GITHUB_PR_FRAGMENT = [
   'fragment pr on PullRequest {',
   'number title url state isDraft reviewDecision mergeable updatedAt',
   'repository { nameWithOwner } author { login }',
   'commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }',
   '}',
+]
+const GITHUB_VARIABLES = '$review: String!, $open: String!, $closed: String!, $first: Int!, $recent: Int!'
+
+export const GITHUB_QUERY = [
+  `query(${GITHUB_VARIABLES}, $repos: Int!) {`,
+  'viewer { login',
+  'repositories(first: $repos, orderBy: { field: PUSHED_AT, direction: DESC }, ownerAffiliations: [OWNER, COLLABORATOR, ORGANIZATION_MEMBER]) { nodes { ...repo } }',
+  'contributed: repositoriesContributedTo(first: $repos, includeUserRepositories: false, contributionTypes: [COMMIT, PULL_REQUEST, PULL_REQUEST_REVIEW]) { nodes { ...repo } }',
+  '}',
+  ...GITHUB_SEARCH_FIELDS,
+  '}',
+  ...GITHUB_PR_FRAGMENT,
+  'fragment repo on Repository { nameWithOwner isArchived pullRequests(states: OPEN) { totalCount } }',
 ].join(' ')
 
-export const GITHUB_SEARCHES = {
-  review: 'is:pr is:open archived:false review-requested:@me',
-  open: 'is:pr is:open archived:false involves:@me',
-  closed: 'is:pr is:closed archived:false involves:@me sort:updated-desc',
+export const GITHUB_PROJECT_QUERY = [`query(${GITHUB_VARIABLES}) {`, 'viewer { login }', ...GITHUB_SEARCH_FIELDS, '}', ...GITHUB_PR_FRAGMENT].join(' ')
+
+export function githubSearchesOf(path?: string) {
+  const scope = path ? `repo:${path} is:pr` : 'is:pr archived:false'
+  const involving = path ? '' : ' involves:@me'
+  return {
+    review: `${scope} is:open review-requested:@me`,
+    open: `${scope} is:open${involving}`,
+    closed: `${scope} is:closed${involving} sort:updated-desc`,
+  }
 }
+
+export const GITLAB_USER_PATH = 'user'
+
+export const GITLAB_PROJECTS_PATH = `projects?membership=true&archived=false&simple=true&order_by=last_activity_at&per_page=${LAYOUT.projectsFetched}`
+
+export const gitlabProjectPathsOf = (id: number) => [
+  `projects/${id}/merge_requests?state=opened&per_page=${LAYOUT.gitlabPageSize}`,
+  `projects/${id}/merge_requests?state=all&order_by=updated_at&per_page=${LAYOUT.recentFetched}`,
+]
 
 export const GITHUB_DETAIL_FIELDS = 'body,additions,deletions,changedFiles,baseRefName,headRefName,statusCheckRollup,reviewRequests,latestReviews'
 
@@ -115,15 +143,57 @@ function githubItemOf(node: Raw, role: ReviewRole): ReviewItem | undefined {
   }
 }
 
-export function githubItemsOf(json: string): ReviewItem[] {
+export function githubItemsOf(json: string, otherRole: ReviewRole = 'involved'): ReviewItem[] {
   const data = rawOf(rawOf(JSON.parse(json)).data)
   const me = textOf(rawOf(data.viewer).login)
-  const nodesOf = (alias: keyof typeof GITHUB_SEARCHES) => listOf(rawOf(data[alias]).nodes)
+  const nodesOf = (alias: keyof ReturnType<typeof githubSearchesOf>) => listOf(rawOf(data[alias]).nodes)
   return mergedOf([
     ...nodesOf('review').flatMap(node => githubItemOf(node, 'review') ?? []),
-    ...nodesOf('open').flatMap(node => githubItemOf(node, textOf(rawOf(node.author).login) === me ? 'mine' : 'involved') ?? []),
+    ...nodesOf('open').flatMap(node => githubItemOf(node, textOf(rawOf(node.author).login) === me ? 'mine' : otherRole) ?? []),
     ...nodesOf('closed').flatMap(node => githubItemOf(node, 'recent') ?? []),
   ])
+}
+
+export function githubProjectsOf(json: string): ReviewProject[] {
+  const viewer = rawOf(rawOf(rawOf(JSON.parse(json)).data).viewer)
+  const found = [...listOf(rawOf(viewer.repositories).nodes), ...listOf(rawOf(viewer.contributed).nodes)].flatMap(node => {
+    const path = textOf(node.nameWithOwner)
+    if (!path || node.isArchived === true) return []
+    return [{ key: `github:${path}`, host: 'github' as const, path, openCount: Number(rawOf(node.pullRequests).totalCount) || 0 }]
+  })
+  const unique = found.filter((one, at) => found.findIndex(other => other.key === one.key) === at)
+  return unique.sort((a, b) => (b.openCount ?? 0) - (a.openCount ?? 0))
+}
+
+export const gitlabProjectsOf = (json: string): ReviewProject[] =>
+  listOf(JSON.parse(json)).flatMap(raw => {
+    const id = Number(raw.id) || 0
+    const path = textOf(raw.path_with_namespace)
+    return id && path ? [{ key: `gitlab:${id}`, host: 'gitlab' as const, path, id }] : []
+  })
+
+export const gitlabLoginOf = (json: string) => textOf(rawOf(JSON.parse(json)).username)
+
+const isNamed = (people: unknown, login: string) => listOf(people).some(person => textOf(person.username) === login)
+
+function gitlabRoleOf(raw: Raw, me: string): ReviewRole {
+  if (GITLAB_STATES[textOf(raw.state)] !== 'open') return 'recent'
+  if (isNamed(raw.reviewers, me)) return 'review'
+  if (textOf(rawOf(raw.author).username) === me) return 'mine'
+  return isNamed(raw.assignees, me) ? 'assigned' : 'others'
+}
+
+export const gitlabProjectItemsOf = (answers: string[], me: string) =>
+  mergedOf(answers.flatMap(json => listOf(JSON.parse(json)).flatMap(raw => gitlabItemOf(raw, gitlabRoleOf(raw, me)) ?? [])))
+
+export function projectOf(value: unknown): ReviewProject | undefined {
+  const raw = rawOf(value)
+  const host = raw.host === 'github' || raw.host === 'gitlab' ? raw.host : undefined
+  const key = textOf(raw.key)
+  const path = textOf(raw.path)
+  if (!host || !key || !path) return undefined
+  const id = Number(raw.id) || undefined
+  return host === 'gitlab' && !id ? undefined : { key, host, path, id }
 }
 
 function gitlabItemOf(raw: Raw, role: ReviewRole): ReviewItem | undefined {

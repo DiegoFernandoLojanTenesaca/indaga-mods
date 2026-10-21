@@ -33,8 +33,8 @@
     },
     {
       "name": "review-pane",
-      "description": "Your pull requests and merge requests beside the chat: the GitHub and GitLab ones that wait for your review, yours and the ones you take part in, with their checks, a toast when someone asks for your review, and one press to review one in the chat. /reviews opens it.",
-      "version": "0.1.0",
+      "description": "Your pull requests and merge requests beside the chat: the GitHub and GitLab ones that wait for your review, yours and the ones you take part in, or every one of a project you pick, with their checks, a toast when someone asks for your review, and one press to review one in the chat. /reviews opens it.",
+      "version": "0.2.0",
       "source": "./plugins/review-pane",
       "category": "Development",
       "tags": [

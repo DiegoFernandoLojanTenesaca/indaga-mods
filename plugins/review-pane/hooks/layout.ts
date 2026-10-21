@@ -5,6 +5,8 @@ export const LAYOUT = {
   gitlabPageSize: 50,
   recentCount: 5,
   recentFetched: 10,
+  projectsFetched: 30,
+  mobileProjects: 6,
   refreshMinutes: 5,
   toastsAtOnce: 3,
   seenLimit: 300,
