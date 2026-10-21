@@ -1,0 +1,45 @@
+{
+  "name": "mail-pane",
+  "version": "0.1.0",
+  "description": "Your latest mail beside the chat, through the Microsoft 365 connector: from one sender domain or the whole inbox, read in the pane, passed to the chat, with a toast when new mail comes in. /mail opens it.",
+  "author": {
+    "name": "IndagaLab",
+    "url": "https://github.com/DiegoFernandoLojanTenesaca"
+  },
+  "license": "MIT",
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "domain": {
+      "type": "string",
+      "title": "Sender domain",
+      "description": "Only mail sent from this domain or address (example.com). Empty shows the newest mail of the inbox.",
+      "default": ""
+    },
+    "watch": {
+      "type": "string",
+      "title": "Watched senders",
+      "description": "Addresses or names, separated by commas, whose new mail raises a toast. Empty: every new mail of the domain does.",
+      "default": ""
+    },
+    "refreshMinutes": {
+      "type": "number",
+      "title": "Refresh every (minutes)",
+      "description": "How often the pane looks for new mail.",
+      "default": 5,
+      "min": 1,
+      "max": 120
+    },
+    "connector": {
+      "type": "string",
+      "title": "Microsoft 365 connector",
+      "description": "The connector's name as /mcp lists it.",
+      "default": "claude.ai Microsoft 365"
+    },
+    "openOnStart": {
+      "type": "boolean",
+      "title": "Open on start",
+      "description": "Open the mail pane when a session starts. Where /mail does not run (the desktop app and other hosts), this or asking Claude for the mail opens it.",
+      "default": true
+    }
+  }
+}

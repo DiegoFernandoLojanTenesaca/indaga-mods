@@ -17,6 +17,19 @@
         "command",
         "music"
       ]
+    },
+    {
+      "name": "mail-pane",
+      "description": "Your latest mail beside the chat, through the Microsoft 365 connector: from one sender domain or the whole inbox, read in the pane, passed to the chat, with a toast when new mail comes in. /mail opens it.",
+      "version": "0.1.0",
+      "source": "./plugins/mail-pane",
+      "category": "Productivity",
+      "tags": [
+        "pane",
+        "command",
+        "mail",
+        "toast"
+      ]
     }
   ]
 }
