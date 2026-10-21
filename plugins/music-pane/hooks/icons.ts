@@ -9,4 +9,7 @@ export const ICONS = {
   louder: '+',
   themeChosen: '◉',
   themeOther: '●',
+  sliderFilled: '━',
+  sliderKnob: '●',
+  sliderEmpty: '─',
 }

@@ -18,11 +18,11 @@ import { LAYOUT } from './layout'
 import {
   clockOf,
   cueIndexAt,
-  durationOf,
   hashOf,
   joinPath,
+  nameOf,
   parseSrt,
-  positionOf,
+  reportOf,
   scanLibrary,
   splitTitle,
   stanzasOf,
@@ -69,7 +69,7 @@ const PLAY_SCHEMA = {
   },
   required: ['query'],
 }
-const DEFAULTS = { player: 'ffplay', ffmpeg: 'ffmpeg', ytdlp: 'yt-dlp' }
+const DEFAULTS = { player: 'mpv', ffmpeg: 'ffmpeg', ytdlp: 'yt-dlp' }
 const YTDLP_TIMEOUT_MS = 90_000
 const FFMPEG_TIMEOUT_MS = 30_000
 const PLAYED_LIMIT = 200
@@ -77,7 +77,9 @@ const RADIO_SIZE = 25
 const END_SLACK_MS = 5_000
 const MAX_RETRIES = 2
 const VOLUME = { step: 10, least: 0, most: 100, initial: 100 }
-const RECONNECT = ['-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_on_network_error', '1', '-reconnect_delay_max', '5']
+const RECONNECT = '--stream-lavf-o=reconnect=1,reconnect_streamed=1,reconnect_on_network_error=1,reconnect_delay_max=5'
+const PLAYER_SCRIPT = ['player', 'control.lua']
+const CONTROL_FILE = 'music-pane-control.json'
 const STORE = { theme: 'theme', volume: 'volume', history: 'history' }
 const HISTORY = 'history'
 const COVER_PREFIX = `music-pane-cover-${LAYOUT.coverWidth}x${LAYOUT.coverHeight}-`
@@ -105,7 +107,7 @@ type Config = { library: string; artist: string; channel: string; player: string
 type Ready = { source: string; sung: MusicLyrics; durationMs?: number }
 
 let generation = 0
-let heard = { run: 0, positionMs: 0 }
+let live: number | undefined
 let wantedCover: string | undefined
 let locale: Promise<Locale> | undefined
 const lineCache = new Map<string, string[]>()
@@ -128,18 +130,18 @@ export const configOf = (options: Record<string, unknown>): Config => ({
   ytdlp: textOption(options.ytdlp, DEFAULTS.ytdlp),
 })
 
-export const playerArgs = (source: string, fromMs: number, level: number) => [
-  '-nodisp',
-  '-vn',
-  '-autoexit',
-  '-loglevel',
-  'info',
-  '-stats',
-  ...(isStream(source) ? RECONNECT : []),
-  '-volume',
-  String(level),
-  '-ss',
-  (fromMs / 1000).toFixed(3),
+export type PlayerRun = { source: string; fromMs: number; level: number; script: string; control: string; run: number }
+
+export const playerArgs = ({ source, fromMs, level, script, control, run }: PlayerRun) => [
+  '--no-video',
+  '--no-config',
+  '--no-terminal',
+  '--idle=no',
+  ...(isStream(source) ? [RECONNECT] : []),
+  `--volume=${level}`,
+  `--start=${(fromMs / 1000).toFixed(3)}`,
+  `--script=${script}`,
+  `--script-opts=music-pane-control=${control},music-pane-run=${run}`,
   source,
 ]
 
@@ -383,7 +385,13 @@ async function stop($: EngineInterface) {
   await update($, playback, () => null)
 }
 
-const positionNow = (current: MusicPlayback) => (heard.run === generation ? heard.positionMs : current.positionMs)
+async function controlPathOf($: EngineInterface) {
+  return joinPath(await tempFolderOf($), CONTROL_FILE)
+}
+
+async function steer($: EngineInterface, run: number, isPaused: boolean) {
+  await $.fs.write(await controlPathOf($), JSON.stringify({ run, volume: await read($, volume), pause: isPaused }))
+}
 
 async function listen(
   $: EngineInterface,
@@ -395,30 +403,40 @@ async function listen(
   attempt: number,
 ) {
   const cues: MusicCue[] = ready.sung.cues
+  const control = await controlPathOf($)
   const level = await read($, volume)
+  const script = PLAYER_SCRIPT.reduce(joinPath, $.plugin.root)
+  await steer($, run, false)
   let shown = ''
   let lastMs = fromMs
   let lengthMs = ready.durationMs
   let hasPlayed = false
-  for await (const piece of $.process.spawn({ argv: [config.player, ...playerArgs(ready.source, fromMs, level)] })) {
-    if (run !== generation) return
-    const durationMs = lengthMs === undefined ? durationOf(piece.text) : undefined
-    if (durationMs !== undefined) {
-      lengthMs = durationMs
-      await update($, playback, current => (current?.trackId === track.id ? { ...current, durationMs } : current))
+  const argv = [config.player, ...playerArgs({ source: ready.source, fromMs, level, script, control, run })]
+  live = run
+  try {
+    for await (const piece of $.process.spawn({ argv })) {
+      if (run !== generation) return
+      const report = reportOf(piece.text)
+      const durationMs = report.lengthMs
+      if (durationMs !== undefined && durationMs !== lengthMs) {
+        lengthMs = durationMs
+        await update($, playback, current => (current?.trackId === track.id ? { ...current, durationMs } : current))
+      }
+      const positionMs = report.positionMs
+      if (positionMs === undefined) continue
+      hasPlayed = true
+      lastMs = positionMs
+      const mark = `${Math.floor(positionMs / 1000)}:${cueIndexAt(cues, positionMs)}`
+      if (mark === shown) continue
+      shown = mark
+      await update($, playback, current => (current?.trackId === track.id ? { ...current, positionMs } : current))
     }
-    const positionMs = positionOf(piece.text)
-    if (positionMs === undefined) continue
-    hasPlayed = true
-    lastMs = positionMs
-    heard = { run, positionMs }
-    const mark = `${Math.floor(positionMs / 1000)}:${cueIndexAt(cues, positionMs)}`
-    if (mark === shown) continue
-    shown = mark
-    await update($, playback, current => (current?.trackId === track.id ? { ...current, positionMs } : current))
+  } finally {
+    if (live === run) live = undefined
   }
   if (run !== generation) return
-  if (!hasPlayed) return fail($, run, { key: 'playerFailed', values: { player: config.player, title: track.title } })
+  const player = nameOf(config.player)
+  if (!hasPlayed) return fail($, run, { key: 'playerFailed', values: { player, title: track.title } })
   const isCut = lengthMs !== undefined && lastMs < lengthMs - END_SLACK_MS
   if (isCut && attempt < MAX_RETRIES) return play($, config, track, lastMs, undefined, attempt + 1)
   await skipFrom($, config, track, 1)
@@ -495,22 +513,27 @@ async function skip($: EngineInterface, config: Config, step: number) {
 async function toggle($: EngineInterface, config: Config) {
   const now = await currentTrack($)
   if (!now || now.current.isLoading) return
-  if (now.current.isPlaying) {
-    const positionMs = positionNow(now.current)
-    generation++
-    await update($, playback, current => current && { ...current, positionMs, isPlaying: false })
+  if (live === generation) {
+    const isPaused = now.current.isPlaying
+    await steer($, generation, isPaused)
+    await update($, playback, current => current && { ...current, isPlaying: !isPaused })
     return
   }
-  await play($, config, now.track, now.current.positionMs, now.current.source)
+  if (!now.current.isPlaying) await play($, config, now.track, now.current.positionMs, now.current.source)
 }
 
-async function changeVolume($: EngineInterface, config: Config, step: number) {
-  const level = volumeOf((await read($, volume)) + step) ?? VOLUME.initial
-  await update($, volume, () => level)
-  await $.store.set(STORE.volume, level)
-  const now = await currentTrack($)
-  if (!now?.current.isPlaying || now.current.isLoading) return
-  await play($, config, now.track, positionNow(now.current), now.current.source)
+async function setVolume($: EngineInterface, wanted: number, isKept: boolean) {
+  const level = volumeOf(wanted) ?? VOLUME.initial
+  if (level !== (await read($, volume))) {
+    await update($, volume, () => level)
+    const current = await read($, playback)
+    if (live === generation && current) await steer($, generation, !current.isPlaying)
+  }
+  if (isKept) await $.store.set(STORE.volume, level)
+}
+
+async function changeVolume($: EngineInterface, step: number) {
+  await setVolume($, (await read($, volume)) + step, true)
 }
 
 async function chooseTheme($: EngineInterface, name: string) {
@@ -565,6 +588,12 @@ export const register: Register = (on, options) => {
     if (!chosen) return { result: translate(current, 'nothingFound', { query: e.query }) }
     void pick($, config, chosen).catch(() => {})
     return { result: translate(current, 'toolPlaying', { title: splitTitle(chosen.title).name }) }
+  })
+
+  on('ui.message', { component: 'Pane', requestId: PANE }, async ($, e) => {
+    const sent = e.data as { volume?: unknown; isDone?: unknown } | null
+    if (typeof sent?.volume === 'number') await setVolume($, sent.volume, sent.isDone === true)
+    return {}
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
@@ -648,6 +677,28 @@ export const register: Register = (on, options) => {
         cover: hasCover ? <Svg source={coverSvgOf(art.data)} alt={t('cover', { album: playing?.name ?? '' })} /> : null,
         progress: <Svg source={progressSvgOf(fraction, accent)} alt={t('progress', { elapsed, total })} />,
       }
+    }
+
+    const volumeControl = () => {
+      if (e.surface === 'terminal' || e.surface === 'desktop') {
+        const { Client } = $.ui.resolve(e)
+        const slider = {
+          level,
+          least: VOLUME.least,
+          most: VOLUME.most,
+          accent,
+          filled: ICONS.sliderFilled,
+          knob: ICONS.sliderKnob,
+          empty: ICONS.sliderEmpty,
+        }
+        return <Client key="volume" module="./slider.tsx" width={LAYOUT.sliderColumns} props={slider} />
+      }
+      return (
+        <Box flexDirection="row" gap={LAYOUT.buttonGap}>
+          <Button key="quieter" label={ICONS.quieter} onPress={() => changeVolume($, -VOLUME.step)} />
+          <Button key="louder" label={ICONS.louder} onPress={() => changeVolume($, VOLUME.step)} />
+        </Box>
+      )
     }
 
     const searchField = () => {
@@ -802,9 +853,11 @@ export const register: Register = (on, options) => {
                 </Button>
                 <Button key="next" label={ICONS.next} onPress={() => skip($, config, 1)} />
                 <Button key="stop" label={ICONS.stop} onPress={() => stop($)} />
-                <Button key="quieter" label={ICONS.quieter} onPress={() => changeVolume($, config, -VOLUME.step)} />
+              </Box>
+              <Box flexDirection="row" alignItems="center" gap={LAYOUT.buttonGap}>
+                <Text dimColor>{t('volumeLabel')}</Text>
+                {volumeControl()}
                 <Text dimColor>{t('volume', { level: String(level) })}</Text>
-                <Button key="louder" label={ICONS.louder} onPress={() => changeVolume($, config, VOLUME.step)} />
               </Box>
               <Button key="radio" plain onPress={() => toggleRadio($)}>
                 {follows ? <Text color={accent}>{t('radioOn')}</Text> : <Text dimColor>{t('radioOff')}</Text>}

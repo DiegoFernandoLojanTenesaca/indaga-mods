@@ -14,6 +14,7 @@ const CHANNEL = { options: { channel: '@band', artist: 'Band' } }
 const ALBUM = '/music/Album One'
 const FIRST = '/music/Album One/Songs/01 - Song.mp3'
 const SECOND = '/music/Album One/Songs/02 - Other.mp3'
+const COVER = '/music/Album One/Portada.png'
 const PLAYLIST = 'https://www.youtube.com/playlist?list=PL1'
 const VIDEO = 'https://www.youtube.com/watch?v=v1'
 const STREAM = 'https://stream.example/v1'
@@ -24,6 +25,8 @@ const SRT = '1\n00:00:01,000 --> 00:00:02,000\nFirst line\n\n2\n00:00:03,000 -->
 const SURFACES = ['terminal', 'desktop'] as const
 const IDLE = 'Search a song, a singer or a line of the lyrics.'
 const SONG_LENGTH_S = 180
+const CRLF = String.fromCharCode(13, 10)
+const RECONNECT = '--stream-lavf-o=reconnect=1,reconnect_streamed=1,reconnect_on_network_error=1,reconnect_delay_max=5'
 
 const dir = (name: string) => ({ name, kind: 'dir', size: 0, mtimeMs: 0, isLink: false })
 const file = (name: string) => ({ name, kind: 'file', size: 1, mtimeMs: 0, isLink: false })
@@ -58,13 +61,8 @@ const until = async (check: () => Promise<unknown>) => {
   for (let i = 0; i < 400 && !(await check()); i++) await pause()
 }
 const portable = (path: string) => path.replace(/^[A-Za-z]:/, '').replaceAll('\\', '/')
-const status = (seconds: number) => `   ${seconds.toFixed(2)} M-A:  0.000 fd=   0 aq=    4KB vq=    0KB sq=    0B \r`
-const durationLine = (seconds: number) => {
-  const whole = Math.floor(seconds)
-  const clock = [Math.floor(whole / 3600), Math.floor(whole / 60) % 60, whole % 60].map(part => String(part).padStart(2, '0'))
-  return `  Duration: ${clock.join(':')}.${String(Math.round((seconds % 1) * 100)).padStart(2, '0')}, start: 0.000000\n`
-}
-const startOf = (argv: string[]) => argv[argv.indexOf('-ss') + 1]
+const line = (kind: string, seconds: number) => `@${kind} ${seconds.toFixed(3)}${CRLF}`
+const option = (argv: string[], name: string) => argv.find(one => one.startsWith(`--${name}=`))?.slice(name.length + 3)
 
 type Song = { positions: number[]; holds: boolean; lengthS?: number }
 
@@ -72,9 +70,18 @@ function engine(on: any, songs: Record<string, Song>) {
   const spawned: string[][] = []
   const stopped: string[] = []
   const runs: string[][] = []
+  const writes: { path: string; text: string }[] = []
   const pulls = { count: 0 }
   const opened: string[] = []
   const stored: Record<string, unknown> = {}
+  const seeded = new Map<string, unknown>()
+  const sets: { key: string; value: unknown }[] = []
+  on('state.get', (_$: any, e: any, next: any) => (seeded.has(e.key) ? { value: { value: seeded.get(e.key), version: 0 } } : next(e)))
+  on('state.set', (_$: any, e: any, next: any) => {
+    seeded.delete(e.key)
+    sets.push({ key: e.key, value: e.value })
+    return next(e)
+  })
   on('session.start', (_$: any, e: any) => ({ sessionId: 's', cwd: e.cwd }))
   on('command.register', () => ({ value: undefined }))
   on('tool.register', (_$: any, e: any) => ({ value: { tool: `mcp__music-pane__${e.name}` } }))
@@ -83,6 +90,7 @@ function engine(on: any, songs: Record<string, Song>) {
   on('store.set', (_$: any, e: any) => ((stored[e.key] = e.value), { value: undefined }))
   on('env.get', (_$: any, e: any) => ({ value: e.name === 'TEMP' ? '/tmp' : undefined }))
   on('fs.exists', () => ({ value: false }))
+  on('fs.write', (_$: any, e: any) => (writes.push({ path: e.path, text: e.text }), { value: undefined }))
   on('fs.list', (_$: any, e: any) => ({ value: TREE[portable(e.path)] ?? [] }))
   on('fs.read', (_$: any, e: any) => {
     if (e.as === 'bytes') return { value: { base64: 'Q09WRVI=' } }
@@ -103,15 +111,15 @@ function engine(on: any, songs: Record<string, Song>) {
     const last = song.positions.at(-1) ?? 0
     spawned.push(e.argv)
     try {
-      yield { stream: 'stderr', text: song.positions.length > 0 ? durationLine(song.lengthS ?? last + 1) : 'No such file\n' }
+      yield { stream: 'stdout', text: song.positions.length > 0 ? line('len', song.lengthS ?? last + 1) : `Failed to open${CRLF}` }
       for (const seconds of song.positions) {
         pulls.count++
-        yield { stream: 'stderr', text: status(seconds) }
+        yield { stream: 'stdout', text: line('pos', seconds) }
         await pause()
       }
       while (song.holds) {
         pulls.count++
-        yield { stream: 'stderr', text: status(last) }
+        yield { stream: 'stdout', text: line('pos', last) }
         await pause()
       }
     } finally {
@@ -119,10 +127,12 @@ function engine(on: any, songs: Record<string, Song>) {
     }
     return { value: { code: 0, signal: null } }
   })
-  return { spawned, stopped, pulls, opened, runs, stored }
+  const control = () => JSON.parse(writes.filter(one => one.path.endsWith('music-pane-control.json')).at(-1)?.text ?? '{}')
+  const lastSet = (key: string) => sets.filter(one => one.key === key).at(-1)?.value
+  return { spawned, stopped, pulls, opened, runs, stored, control, seeded, lastSet }
 }
 
-async function startPane($: any, surface: 'terminal' | 'desktop' = 'desktop') {
+async function startPane($: any, surface: 'terminal' | 'desktop' | 'mobile' = 'desktop') {
   await $.session.start({ surface, isInteractive: true, cwd: '/work' })
   return (await $.ui.mount({ plugin: 'music-pane', surface, ...PANE })) as Mounted<'desktop'>
 }
@@ -144,41 +154,103 @@ describe('music-pane', () => {
   })
 
   for (const surface of SURFACES) {
-    test(`plays a song, pauses it on its synced line and resumes there on ${surface}`, OPTIONS, async ($, on) => {
-      const { spawned, stopped, pulls, runs } = engine(on, { [FIRST]: { positions: [0.5, 1.2], holds: true, lengthS: SONG_LENGTH_S } })
+    test(`plays with mpv, pauses and resumes in place, and drags the volume live on ${surface}`, OPTIONS, async ($, on) => {
+      const { spawned, stopped, pulls, stored, control, lastSet } = engine(on, { [FIRST]: { positions: [0.5, 1.2], holds: true, lengthS: SONG_LENGTH_S } })
       const pane = await startPane($, surface)
       await until(() => pane.find({ key: `shelf:${ALBUM}|${FIRST}` }))
-      expect(await pane.find({ type: 'Text', text: IDLE })).toBeUndefined()
 
       const playing = pane.press({ key: `shelf:${ALBUM}|${FIRST}` })
       await until(async () => pulls.count >= 4)
-      await pane.press({ key: 'toggle' })
-      await playing
-      expect(spawned[0]).toEqual(['ffplay', '-nodisp', '-vn', '-autoexit', '-loglevel', 'info', '-stats', '-volume', '100', '-ss', '0.000', FIRST])
-      expect(stopped).toEqual([FIRST])
-      expect(await pane.find({ type: 'Text', text: '0:01' })).toBeDefined()
-      expect(await pane.find({ type: 'Text', text: '3:00' })).toBeDefined()
-      expect(await pane.find({ type: 'Text', text: 'LYRICS' })).toBeDefined()
-      expect(await pane.find({ type: 'Text', text: 'UP NEXT' })).toBeDefined()
-      expect(await pane.find({ key: `next:${ALBUM}|${SECOND}`, text: /Other/ })).toBeDefined()
-      expect(await pane.find({ type: 'Text', text: 'Then: songs like Song' })).toBeDefined()
-      expect(await pane.find({ type: 'Text', text: 'Song' })).toMatchObject({ props: { bold: true } })
-      expect(await pane.find({ type: 'Text', text: 'First line' })).toMatchObject({ props: { bold: true } })
-      expect(await pane.find({ type: 'Text', text: 'Second line' })).toMatchObject({ props: { dimColor: true } })
-      expect(await pane.find({ type: 'Text', text: ICONS.play })).toBeDefined()
-      expect(await pane.find({ type: 'Text', text: '100 %' })).toBeDefined()
-      expect(runs.find(argv => argv[0] === 'ffmpeg')).toContain('/music/Album One/Portada.png')
-      expect(await pane.findAll({ type: 'Svg' })).toHaveLength(surface === 'desktop' ? 2 : 0)
+      const argv = spawned[0]!
+      expect(argv.slice(0, 7)).toEqual(['mpv', '--no-video', '--no-config', '--no-terminal', '--idle=no', '--volume=100', '--start=0.000'])
+      expect(option(argv, 'script')).toMatch(/[\\/]player[\\/]control\.lua$/)
+      expect(option(argv, 'script-opts')).toMatch(/^music-pane-control=.*music-pane-control\.json,music-pane-run=\d+$/)
+      expect(argv).not.toContain(RECONNECT)
+      expect(argv.at(-1)).toBe(FIRST)
+      expect(control()).toMatchObject({ volume: 100, pause: false })
 
+      const paused = pane.press({ key: 'toggle' })
+      await until(async () => control().pause === true && (lastSet('playback') as any)?.isPlaying === false)
+      expect(lastSet('playback')).toMatchObject({ isPlaying: false, positionMs: 1200, durationMs: SONG_LENGTH_S * 1000 })
       const resumed = pane.press({ key: 'toggle' })
-      await until(async () => spawned.length === 2)
-      await pane.press({ key: 'stop' })
-      await resumed
-      expect(startOf(spawned[1]!)).toBe('1.200')
-      expect(stopped).toEqual([FIRST, FIRST])
+      await until(async () => control().pause === false && (lastSet('playback') as any)?.isPlaying === true)
+      expect(spawned).toHaveLength(1)
+      expect(stopped).toEqual([])
+
+      const grabbed = pane.pointer({ type: 'down', x: 0, y: 0, button: 'left', in: 'volume' })
+      await until(async () => control().volume === 0)
+      expect(control()).toMatchObject({ volume: 0, pause: false })
+      const dragged = pane.pointer({ type: 'move', x: 30, y: 0, button: 'left', in: 'volume' })
+      const released = pane.pointer({ type: 'up', x: 30, y: 0, button: 'left', in: 'volume' })
+      await until(async () => control().volume === 100 && stored.volume === 100)
+      expect(spawned).toHaveLength(1)
+
+      const stopping = pane.press({ key: 'stop' })
+      await Promise.all([playing, paused, resumed, grabbed, dragged, released, stopping])
+      expect(stopped).toEqual([FIRST])
       await pane.unmount()
     })
   }
+
+  test('draws the song playing in the chosen theme', OPTIONS, async ($, on) => {
+    const { stored, seeded } = engine(on, {})
+    stored.theme = 'blue'
+    stored.volume = 80
+    seeded.set('lyrics', {
+      trackId: FIRST,
+      cues: [
+        { startMs: 1000, text: 'First line' },
+        { startMs: 3000, text: 'Second line' },
+      ],
+      stanzas: [],
+    })
+    seeded.set('cover', { source: COVER, data: 'Q09WRVI=' })
+    seeded.set('playback', {
+      albumId: ALBUM,
+      trackId: FIRST,
+      positionMs: 1200,
+      durationMs: SONG_LENGTH_S * 1000,
+      source: FIRST,
+      isPlaying: false,
+      isLoading: false,
+    })
+    const pane = await startPane($)
+    await until(() => pane.find({ key: `next:${ALBUM}|${SECOND}` }))
+    expect(await pane.find({ type: 'Text', text: 'Song' })).toMatchObject({ props: { bold: true } })
+    expect(await pane.find({ type: 'Text', text: '0:01' })).toBeDefined()
+    expect(await pane.find({ type: 'Text', text: '3:00' })).toBeDefined()
+    expect(await pane.find({ type: 'Text', text: 'LYRICS' })).toBeDefined()
+    expect(await pane.find({ type: 'Text', text: 'First line' })).toMatchObject({ props: { bold: true, color: THEMES.blue } })
+    expect(await pane.find({ type: 'Text', text: 'Second line' })).toMatchObject({ props: { dimColor: true } })
+    expect(await pane.find({ type: 'Text', text: 'UP NEXT' })).toBeDefined()
+    expect(await pane.find({ type: 'Text', text: 'Then: songs like Song' })).toBeDefined()
+    expect(await pane.find({ type: 'Text', text: ICONS.play })).toMatchObject({ props: { color: THEMES.blue } })
+    expect(await pane.find({ type: 'Text', text: '80 %' })).toBeDefined()
+    expect(await pane.find({ key: 'volume' })).toBeDefined()
+    expect(await pane.findAll({ type: 'Svg' })).toHaveLength(2)
+    expect(await pane.find({ key: 'theme:blue', text: ICONS.themeChosen })).toBeDefined()
+    await pane.unmount()
+  })
+
+  test('turns the volume with buttons where there is no slider', OPTIONS, async ($, on) => {
+    const { stored, seeded } = engine(on, {})
+    seeded.set('playback', {
+      albumId: ALBUM,
+      trackId: FIRST,
+      positionMs: 0,
+      source: FIRST,
+      isPlaying: false,
+      isLoading: false,
+    })
+    const pane = await startPane($, 'mobile')
+    await until(() => pane.find({ key: 'quieter' }))
+    expect(await pane.find({ key: 'volume' })).toBeUndefined()
+    await pane.press({ key: 'quieter' })
+    await pane.press({ key: 'quieter' })
+    expect(await pane.find({ type: 'Text', text: '80 %' })).toBeDefined()
+    expect(stored.volume).toBe(80)
+    await pane.unmount()
+  })
 
   test('goes on to the next song when one ends', OPTIONS, async ($, on) => {
     const { spawned } = engine(on, {
@@ -202,7 +274,7 @@ describe('music-pane', () => {
     await until(() => pane.find({ key: `shelf:${ALBUM}|${FIRST}` }))
     await pane.press({ key: `shelf:${ALBUM}|${FIRST}` })
     await until(async () => spawned.length === 4)
-    expect(spawned.map(argv => [argv.at(-1), startOf(argv)])).toEqual([
+    expect(spawned.map(argv => [argv.at(-1), option(argv, 'start')])).toEqual([
       [FIRST, '0.000'],
       [FIRST, '1.200'],
       [FIRST, '1.200'],
@@ -211,16 +283,15 @@ describe('music-pane', () => {
     await pane.unmount()
   })
 
-  test('shows the plain lyrics of a song without an srt', OPTIONS, async ($, on) => {
-    const { pulls } = engine(on, { [SECOND]: { positions: [0.1], holds: true } })
+  test('loads the plain lyrics of a song without an srt', OPTIONS, async ($, on) => {
+    const { pulls, lastSet } = engine(on, { [SECOND]: { positions: [0.1], holds: true } })
     const pane = await startPane($)
     await until(() => pane.find({ key: `shelf:${ALBUM}|${SECOND}` }))
     const playing = pane.press({ key: `shelf:${ALBUM}|${SECOND}` })
     await until(async () => pulls.count >= 2)
-    await pane.press({ key: 'toggle' })
+    expect(lastSet('lyrics')).toMatchObject({ trackId: SECOND, cues: [], stanzas: ['Plain verse\none', 'Plain chorus'] })
+    await pane.press({ key: 'stop' })
     await playing
-    expect(await pane.find({ type: 'Text', text: 'Plain verse\none' })).toBeDefined()
-    expect(await pane.find({ type: 'Text', text: 'Plain chorus' })).toBeDefined()
     await pane.unmount()
   })
 
@@ -229,7 +300,7 @@ describe('music-pane', () => {
     const pane = await startPane($)
     await until(() => pane.find({ key: `shelf:${ALBUM}|${FIRST}` }))
     await pane.press({ key: `shelf:${ALBUM}|${FIRST}` })
-    expect(await pane.find({ type: 'Text', text: 'ffplay could not play 01 - Song.' })).toBeDefined()
+    expect(await pane.find({ type: 'Text', text: 'mpv could not play 01 - Song.' })).toBeDefined()
     expect(spawned).toHaveLength(1)
     await pane.unmount()
   })
@@ -242,7 +313,7 @@ describe('music-pane', () => {
     await pane.press({ key: `shelf:${PLAYLIST}|${VIDEO}` })
     await until(async () => spawned.length === 2 && (await pane.find({ key: 'quick:Romantic salsa' })) !== undefined)
     expect(spawned.map(argv => argv.at(-1))).toEqual([STREAM, LIKE_STREAM])
-    expect(spawned[0]).toContain('-reconnect')
+    expect(spawned[0]).toContain(RECONNECT)
     expect(runs.find(argv => argv.includes(MIX))).toEqual(['yt-dlp', '--flat-playlist', '--playlist-end', '25', '-J', MIX])
     expect(runs.some(argv => argv.includes('https://www.youtube.com/watch?v=v9'))).toBe(false)
     await pane.unmount()
@@ -301,27 +372,6 @@ describe('music-pane', () => {
     expect(spawned[0]?.at(-1)).toBe(FIRST)
   })
 
-  test('turns the volume down and keeps it for the next song', OPTIONS, async ($, on) => {
-    const { spawned, pulls, stored } = engine(on, { [FIRST]: { positions: [0.5, 1.2], holds: true, lengthS: SONG_LENGTH_S } })
-    const pane = await startPane($)
-    await until(() => pane.find({ key: `shelf:${ALBUM}|${FIRST}` }))
-    const playing = pane.press({ key: `shelf:${ALBUM}|${FIRST}` })
-    await until(async () => pulls.count >= 4)
-    await pane.press({ key: 'toggle' })
-    await playing
-    await pane.press({ key: 'louder' })
-    await pane.press({ key: 'quieter' })
-    await pane.press({ key: 'quieter' })
-    expect(await pane.find({ type: 'Text', text: '80 %' })).toBeDefined()
-    expect(stored.volume).toBe(80)
-    const resumed = pane.press({ key: 'toggle' })
-    await until(async () => spawned.length === 2)
-    await pane.press({ key: 'stop' })
-    await resumed
-    expect(spawned[1]?.[spawned[1].indexOf('-volume') + 1]).toBe('80')
-    await pane.unmount()
-  })
-
   test('remembers what was played and plays it again from the start screen', OPTIONS, async ($, on) => {
     const { spawned, stored } = engine(on, {})
     stored.history = [{ id: VIDEO, album: 'history', title: 'Song One', page: VIDEO, byline: 'Band' }]
@@ -331,33 +381,18 @@ describe('music-pane', () => {
     expect(await pane.find({ key: `recent:history|${VIDEO}`, text: /Song One.*Band/ })).toBeDefined()
     await pane.press({ key: `recent:history|${VIDEO}` })
     expect(spawned[0]?.at(-1)).toBe(STREAM)
-    expect(spawned[0]?.[spawned[0].indexOf('-volume') + 1]).toBe('60')
+    expect(option(spawned[0]!, 'volume')).toBe('60')
     await pane.unmount()
   })
 
-  test('paints the player in the chosen theme and keeps the choice', OPTIONS, async ($, on) => {
-    const { stored, pulls } = engine(on, { [FIRST]: { positions: [0.5, 1.2], holds: true, lengthS: SONG_LENGTH_S } })
+  test('picks a theme from its dots and keeps it', OPTIONS, async ($, on) => {
+    const { stored } = engine(on, {})
     const pane = await startPane($)
-    await until(() => pane.find({ key: `shelf:${ALBUM}|${FIRST}` }))
-    expect(await pane.find({ key: 'theme:pink', text: ICONS.themeChosen })).toBeDefined()
+    await until(() => pane.find({ key: 'theme:pink', text: ICONS.themeChosen }))
     await pane.press({ key: 'theme:blue' })
     expect(stored.theme).toBe('blue')
     expect(await pane.find({ key: 'theme:blue', text: ICONS.themeChosen })).toBeDefined()
-    const playing = pane.press({ key: `shelf:${ALBUM}|${FIRST}` })
-    await until(async () => pulls.count >= 4)
-    await pane.press({ key: 'toggle' })
-    await playing
-    expect(await pane.find({ type: 'Text', text: 'First line' })).toMatchObject({ props: { color: THEMES.blue } })
-    expect(await pane.find({ type: 'Text', text: ICONS.play })).toMatchObject({ props: { color: THEMES.blue } })
-    await pane.unmount()
-  })
-
-  test('starts in the theme chosen before', OPTIONS, async ($, on) => {
-    const { stored } = engine(on, {})
-    stored.theme = 'green'
-    const pane = await startPane($)
-    await until(() => pane.find({ key: 'theme:green', text: ICONS.themeChosen }))
-    expect(await pane.find({ key: 'theme:green', text: ICONS.themeChosen })).toBeDefined()
+    expect(await pane.find({ key: 'theme:pink', text: ICONS.themeOther })).toBeDefined()
     await pane.unmount()
   })
 

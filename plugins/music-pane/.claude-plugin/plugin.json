@@ -1,6 +1,6 @@
 {
   "name": "music-pane",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "A music player beside the chat: your albums and YouTube, a search by title, singer or a line of the lyrics, similar songs after each one, the cover, a progress bar and the lyric line being sung. /music opens it.",
   "author": {
     "name": "IndagaLab",
@@ -29,9 +29,9 @@
     },
     "player": {
       "type": "string",
-      "title": "ffplay",
-      "description": "The ffplay executable, by name on the PATH or by full path.",
-      "default": "ffplay"
+      "title": "mpv",
+      "description": "The mpv executable, by name on the PATH or by full path. It plays the songs, and changes volume and pause while it plays.",
+      "default": "mpv"
     },
     "ffmpeg": {
       "type": "string",

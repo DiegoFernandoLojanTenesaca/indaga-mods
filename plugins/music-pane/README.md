@@ -1,6 +1,6 @@
 # music-pane
 
-A music player in a pane beside the chat. It plays your albums and YouTube with `ffplay`, searches by title, singer or a line of the lyrics, keeps going with similar songs, and shows the cover, a progress bar with the time, and the lyric line being sung, kept in step with the position `ffplay` reports.
+A music player in a pane beside the chat. It plays your albums and YouTube with `mpv`, searches by title, singer or a line of the lyrics, keeps going with similar songs, and shows the cover, a progress bar with the time, and the lyric line being sung, kept in step with the position `mpv` reports.
 
 ## Install
 
@@ -18,7 +18,7 @@ claude plugin install music-pane --marketplace DiegoFernandoLojanTenesaca/indaga
 
 In the desktop app, where `/plugin` does not run: click + next to the prompt box, then Plugins, Add marketplace with `DiegoFernandoLojanTenesaca/indaga-mods`, then Add plugin.
 
-It needs `ffplay` and `ffmpeg`, which come with [FFmpeg](https://ffmpeg.org/download.html), and [yt-dlp](https://github.com/yt-dlp/yt-dlp) for YouTube.
+It needs [mpv](https://mpv.io/installation/) to play, `ffmpeg` from [FFmpeg](https://ffmpeg.org/download.html) for the covers, and [yt-dlp](https://github.com/yt-dlp/yt-dlp) for YouTube. The mod hands mpv a small Lua script of its own (`player/control.lua`) that reads a control file the mod writes, so volume and pause change while the song plays, with no gap and nothing heard twice.
 
 ## Options
 
@@ -71,7 +71,7 @@ Once something plays, from the top: the search field, then the results of the la
 
 ## Using it
 
-Search, or pick an album in the library, then a song. ❚❚ stops `ffplay` and ⏵ starts it again where it was. − and + turn the volume down or up by 10; ffplay takes the volume only when it starts, so the song starts again from where it was, with a short gap. The color dots at the bottom of the pane pick the theme (pink, red, orange, yellow, green, cyan, blue or purple), which colors the play button, the bar, the banner, the line being sung and the song playing. Volume and theme are kept for the next session.
+Search, or pick an album in the library, then a song. ❚❚ pauses and ⏵ goes on from the same instant. Drag or click the volume bar, as on YouTube; where the surface has no such bar (the phone, the editor), − and + move it by 10. The color dots at the bottom of the pane pick the theme (pink, red, orange, yellow, green, cyan, blue or purple), which colors the play button, the bars, the banner, the line being sung and the song playing. Volume and theme are kept for the next session.
 
-A YouTube song is read over a connection YouTube sometimes drops; ffplay reconnects, and a song that still ends more than five seconds early starts again where it stopped, twice at most, instead of skipping to the next one. 
+A YouTube song is read over a connection YouTube sometimes drops; mpv reconnects, and a song that still ends more than five seconds early starts again where it stopped, twice at most, instead of skipping to the next one. 
 The small covers are made once with `ffmpeg` and kept in the system's temporary folder. Nothing else leaves your computer but what YouTube is asked for.

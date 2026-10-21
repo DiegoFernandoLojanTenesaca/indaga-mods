@@ -12,8 +12,7 @@ const STAMP = /(\d+):(\d+):(\d+)[,.](\d+)\s*-->/
 const MARKUP = /<[^>]*>|\{[^}]*\}/g
 const NOTES = /^[\s♪♫]+|[\s♪♫]+$/g
 const MUSIC_NOTE = '♪'
-const STATUS = /(-?\d+(?:\.\d+)?)\s+[AMV]-[AV]:/g
-const DURATION = /Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/
+const REPORT = /@(pos|len) (\d+(?:\.\d+)?)/g
 const NUMBERED = /^(\d+)\s*-\s*(.+)$/
 const YOUTUBE_SEARCH = 'https://www.youtube.com/results?search_query='
 
@@ -124,14 +123,14 @@ export function cueIndexAt(cues: readonly MusicCue[], positionMs: number) {
   return index
 }
 
-export function positionOf(status: string): number | undefined {
-  const last = [...status.matchAll(STATUS)].at(-1)
-  return last ? Math.round(Number(last[1]) * 1000) : undefined
-}
-
-export function durationOf(status: string): number | undefined {
-  const found = status.match(DURATION) as [string, string, string, string] | null
-  return found ? millisecondsOf(found[1], found[2], found[3]) : undefined
+export function reportOf(output: string) {
+  const report: { positionMs?: number; lengthMs?: number } = {}
+  for (const [, kind, seconds] of output.matchAll(REPORT)) {
+    const ms = Math.round(Number(seconds) * 1000)
+    if (kind === 'pos') report.positionMs = ms
+    else report.lengthMs = ms
+  }
+  return report
 }
 
 export function clockOf(positionMs: number) {

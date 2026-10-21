@@ -4,11 +4,10 @@ import {
   clockOf,
   coverOf,
   cueIndexAt,
-  durationOf,
   hashOf,
   joinPath,
   parseSrt,
-  positionOf,
+  reportOf,
   splitTitle,
   stanzasOf,
   tracksOf,
@@ -17,7 +16,7 @@ import {
 import { localeOf, translate } from './locales'
 
 const BOM = String.fromCharCode(0xfeff)
-const ESCAPE = String.fromCharCode(27)
+const CRLF = String.fromCharCode(13, 10)
 const LINE = String.fromCharCode(10)
 
 describe('library', () => {
@@ -74,16 +73,14 @@ describe('library', () => {
     expect(stanzasOf('')).toEqual([])
   })
 
-  test("reads ffplay's position from its status line", () => {
-    expect(positionOf('    nan    :  0.000 fd=   0 aq=    0KB vq=    0KB sq=    0B \r')).toBeUndefined()
-    expect(positionOf(`${ESCAPE}[2K   1.48 M-A:  0.000 fd=   0 aq=    4KB \r   1.51 M-A:  0.000 fd=   0 \r`)).toBe(1510)
-    expect(positionOf('  62.03 A-V:  0.010 fd=   0')).toBe(62030)
-    expect(positionOf('No such file or directory')).toBeUndefined()
+  test('reads the position and the length the player script reports', () => {
+    const lines = ['@len 211.248', '@pos 10.041', '@len 211.248', '@pos 10.292', ''].join(CRLF)
+    expect(reportOf(lines)).toEqual({ positionMs: 10292, lengthMs: 211248 })
+    expect(reportOf('@pos 3')).toEqual({ positionMs: 3000 })
+    expect(reportOf('[ffmpeg] No such file or directory')).toEqual({})
   })
 
-  test("reads the length ffplay reports, the track number and the album's cover", () => {
-    expect(durationOf("Input #0, mp3, from 'a.mp3':\n  Duration: 00:03:21.12, start: 0.025057, bitrate: 192 kb/s")).toBe(201120)
-    expect(durationOf('  Duration: N/A, bitrate: N/A')).toBeUndefined()
+  test("reads the track number and the album's cover", () => {
     expect(splitTitle('07 - Neo')).toEqual({ number: '07', name: 'Neo' })
     expect(splitTitle('Song - Live')).toEqual({ number: '', name: 'Song - Live' })
     expect(coverOf(['/a/back.jpg', '/a/Portada.png', '/a/song.mp3'])).toBe('/a/Portada.png')

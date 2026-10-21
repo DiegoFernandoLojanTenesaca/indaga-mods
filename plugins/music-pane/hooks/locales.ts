@@ -37,6 +37,7 @@ const en = {
   recentHeading: 'Played lately',
   recentAlbum: 'Played lately',
   volume: '{level} %',
+  volumeLabel: 'Volume',
 }
 
 export type MessageKey = keyof typeof en
@@ -80,6 +81,7 @@ const es: Record<MessageKey, string> = {
   recentHeading: 'Escuchadas hace poco',
   recentAlbum: 'Escuchadas hace poco',
   volume: '{level} %',
+  volumeLabel: 'Volumen',
 }
 
 const LOCALES = {
