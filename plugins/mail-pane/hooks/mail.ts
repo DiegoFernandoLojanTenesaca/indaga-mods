@@ -34,6 +34,9 @@ const UNITS: [Intl.RelativeTimeFormatUnit, number][] = [
   ['minute', 60_000],
 ]
 const CARRIAGE_RETURN = String.fromCharCode(13)
+const SAVED_NOTICE = /exceeds maximum allowed tokens\. Output has been saved to (.+)\.$/m
+const TEXT_TYPE = /^text\/|[/+](json|xml)$/i
+const TEXT_EXTENSION = '.txt'
 
 type Raw = Record<string, unknown>
 
@@ -182,16 +185,23 @@ export function messageOf(raw: Raw, uri: string): MailMessage {
 
 export type AttachmentContent = { data: string; mimeType: string } | { text: string }
 
+export const savedPathOf = (text: string) => SAVED_NOTICE.exec(text)?.[1]
+
 export function contentOf(blocks: readonly Record<string, unknown>[]): AttachmentContent | undefined {
   for (const block of blocks) {
     const resource = (block.resource ?? {}) as Raw
-    const data = textOf(block.data) || textOf(resource.blob)
-    const mimeType = textOf(block.mimeType) || textOf(resource.mimeType)
+    const source = (block.source ?? {}) as Raw
+    const data = textOf(block.data) || textOf(resource.blob) || textOf(source.data)
+    const mimeType = textOf(block.mimeType) || textOf(resource.mimeType) || textOf(source.media_type)
     if (data) return { data, mimeType }
   }
   const text = blocks.map(block => textOf(block.text) || textOf(((block.resource ?? {}) as Raw).text)).join('')
-  return text ? { text } : undefined
+  const notice = parsedOf(text.trim())
+  return !text || (notice && 'note' in notice && 'attachment' in notice) ? undefined : { text }
 }
+
+export const textFileNameOf = (name: string, contentType: string) =>
+  TEXT_TYPE.test(contentType) ? name : `${name}${TEXT_EXTENSION}`
 
 export const isImage = (mimeType: string) => mimeType.toLowerCase().startsWith('image/')
 

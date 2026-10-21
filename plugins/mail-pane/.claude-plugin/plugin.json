@@ -1,6 +1,6 @@
 {
   "name": "mail-pane",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Your latest mail beside the chat, through the Microsoft 365 connector: read each mail and its attachments in the pane, save them to a folder and pass them to the chat to work on, with a toast when new mail comes in. /mail opens it.",
   "author": {
     "name": "IndagaLab",

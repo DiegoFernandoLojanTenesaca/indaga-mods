@@ -1,5 +1,5 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register } from 'claude-code'
+import type { EngineInterface, McpContentBlock, Register } from 'claude-code'
 
 import type {
   MailAttachment,
@@ -27,7 +27,9 @@ import {
   pageOf,
   relativeTimeOf,
   safeNameOf,
+  savedPathOf,
   sizeOf,
+  textFileNameOf,
   watchListOf,
 } from './mail'
 import { DEFAULT_THEME, PALETTE, THEMES, isTheme } from './palette'
@@ -109,10 +111,15 @@ async function setBusy($: EngineInterface, next: MailBusy | null) {
   await update($, busy, () => next)
 }
 
+async function wholeBlockOf($: EngineInterface, block: McpContentBlock): Promise<McpContentBlock> {
+  const path = block.type === 'text' && block.text ? savedPathOf(block.text) : undefined
+  return path ? { type: 'text', text: await $.fs.read(path) } : block
+}
+
 async function callBlocks($: EngineInterface, config: Config, tool: string, args: Record<string, unknown>) {
   const answer = await $.mcp.call(config.connector, tool, args)
   if (answer.isError) throw new Error(tool)
-  return answer.content
+  return Promise.all(answer.content.map(block => wholeBlockOf($, block)))
 }
 
 async function call($: EngineInterface, config: Config, tool: string, args: Record<string, unknown>) {
@@ -165,7 +172,7 @@ async function openMail($: EngineInterface, config: Config, mail: MailSummary) {
   await setBusy($, null)
   const raw = text === undefined ? undefined : jsonObjectsOf(text)[0]
   if (!raw) {
-    await update($, message, () => null)
+    await update($, message, current => (current?.uri === mail.uri ? { ...current, body: mail.preview, thread: mail.preview } : current))
     return setProblem($, { key: 'mailFailed' })
   }
   await update($, message, current => (current?.uri === mail.uri ? messageOf(raw, mail.uri) : current))
@@ -250,18 +257,19 @@ async function saveMail($: EngineInterface, config: Config, mail: MailMessage): 
   const failed: string[] = []
   for (const attachment of mail.attachments) {
     const name = safeNameOf(attachment.name) || attachment.uri.slice(-LAYOUT.tempNameLength)
-    const target = joinPath(folder, name)
     const written = await readAttachment($, config, attachment)
       .then(async content => {
         if (!content) throw new Error(name)
-        if ('text' in content) await $.fs.write(target, content.text)
-        else await writeBytes($, content.data, target)
+        if ('data' in content) {
+          await writeBytes($, content.data, joinPath(folder, name))
+          return name
+        }
+        const textName = textFileNameOf(name, attachment.contentType)
+        await $.fs.write(joinPath(folder, textName), content.text)
+        return textName
       })
-      .then(
-        () => true,
-        () => false,
-      )
-    if (written) files.push(name)
+      .catch(() => undefined)
+    if (written) files.push(written)
     else failed.push(attachment.name)
   }
   await setBusy($, null)

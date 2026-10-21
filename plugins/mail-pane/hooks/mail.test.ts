@@ -13,8 +13,10 @@ import {
   pageOf,
   relativeTimeOf,
   safeNameOf,
+  savedPathOf,
   sizeOf,
   summaryOf,
+  textFileNameOf,
   watchListOf,
 } from './mail'
 
@@ -105,9 +107,30 @@ describe('mail', () => {
     expect(contentOf([{ type: 'image', data: 'UE5H', mimeType: 'image/png' }])).toEqual({ data: 'UE5H', mimeType: 'image/png' })
     expect(contentOf([{ type: 'resource', resource: { uri: 'x', mimeType: 'application/pdf', blob: 'JVBE' } }])).toEqual({ data: 'JVBE', mimeType: 'application/pdf' })
     expect(contentOf([{ type: 'resource', resource: { uri: 'x', text: 'plain' } }])).toEqual({ text: 'plain' })
+    expect(
+      contentOf([
+        { type: 'text', text: '[Resource from Mail at mail:///a/1] ' },
+        { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'UE5H' } },
+        { type: 'text', text: '[Image: source: C:\\results\\blob.png]' },
+      ]),
+    ).toEqual({ data: 'UE5H', mimeType: 'image/png' })
+    const notice = { note: 'PDF text extraction failed.', attachment: { name: 'scan.pdf' }, messageUri: 'mail:///m' }
+    expect(contentOf([{ type: 'text', text: JSON.stringify(notice) }])).toBeUndefined()
     expect(contentOf([])).toBeUndefined()
+    expect(textFileNameOf('report.pdf', 'application/pdf')).toBe('report.pdf.txt')
+    expect(textFileNameOf('notes.md', 'text/markdown')).toBe('notes.md')
+    expect(textFileNameOf('cases.json', 'application/json')).toBe('cases.json')
     expect(isImage('image/jpeg')).toBe(true)
     expect(isImage('application/pdf')).toBe(false)
+  })
+
+  test('finds where a result too long for the session was saved', () => {
+    const text = [
+      'Error: result (50,710 characters across 1 line) exceeds maximum allowed tokens. Output has been saved to C:\\Users\\me\\.claude\\tool-results\\read.txt.',
+      'Format: Plain text',
+    ].join('\n')
+    expect(savedPathOf(text)).toBe('C:\\Users\\me\\.claude\\tool-results\\read.txt')
+    expect(savedPathOf('{"subject":"Plan"}')).toBeUndefined()
   })
 
   test('names folders and files safely', () => {

@@ -34,6 +34,9 @@ const rawOf = (mail: Mail) => ({
 const SHEET = 'mail:///messages/ana/attachments/sheet'
 const NOTES = 'mail:///messages/ana/attachments/notes'
 const PHOTO = 'mail:///messages/ana/attachments/photo'
+const REPORT = 'mail:///messages/ana/attachments/report'
+const SCAN = 'mail:///messages/ana/attachments/scan'
+const SAVED_MAIL = 'C:\\results\\read.txt'
 const FOLDER = 'C:/Users/me/Downloads/Mail/2026-10-21 Budget'
 const FULL = {
   subject: 'Budget',
@@ -46,6 +49,8 @@ const FULL = {
     { uri: SHEET, name: 'budget.xlsx', size: 12_288, contentType: 'application/vnd.ms-excel', isInline: false },
     { uri: NOTES, name: 'notes.md', size: 2_048, contentType: 'text/markdown', isInline: false },
     { uri: PHOTO, name: 'photo.png', size: 3_000, contentType: 'image/png', isInline: false },
+    { uri: REPORT, name: 'report.pdf', size: 40_960, contentType: 'application/pdf', isInline: false },
+    { uri: SCAN, name: 'scan.pdf', size: 90_000, contentType: 'application/pdf', isInline: false },
     { uri: 'mail:///logo', name: 'logo.png', size: 900, contentType: 'image/png', isInline: true },
   ],
   webLink: 'https://outlook.example/ana',
@@ -56,8 +61,13 @@ const until = async (check: () => Promise<unknown>) => {
   for (let i = 0; i < 400 && !(await check()); i++) await pause()
 }
 const answer = (text: string) => ({ value: { content: [{ type: 'text', text }], isError: false } })
+const tooLong = (path: string) =>
+  answer(`Error: result (50,710 characters across 1 line) exceeds maximum allowed tokens. Output has been saved to ${path}.\nFormat: Plain text`)
 
-function engine(on: any, inbox: { mails: Mail[]; more?: Mail[]; fails?: boolean; fills?: boolean; brokenSheet?: boolean }) {
+function engine(
+  on: any,
+  inbox: { mails: Mail[]; more?: Mail[]; fails?: boolean; fills?: boolean; brokenSheet?: boolean; brokenMail?: boolean },
+) {
   const clock = mock.clock(on, { now: NOW })
   const calls: { tool: string; args: Record<string, unknown> }[] = []
   const toasts: string[] = []
@@ -70,6 +80,11 @@ function engine(on: any, inbox: { mails: Mail[]; more?: Mail[]; fails?: boolean;
   const variables: Record<string, string> = { TEMP: 'C:/Temp', USERPROFILE: 'C:/Users/me', OS: 'Windows_NT' }
   on('env.get', (_$: any, e: any) => ({ value: variables[e.name] }))
   on('fs.write', (_$: any, e: any) => (writes.push({ path: e.path.replaceAll(String.fromCharCode(92), '/'), text: e.text }), { value: undefined }))
+  on('fs.read', (_$: any, e: any) => {
+    const isSavedMail = e.path.replaceAll(String.fromCharCode(92), '/') === SAVED_MAIL.replaceAll(String.fromCharCode(92), '/')
+    if (!isSavedMail) throw new Error(e.path)
+    return { value: JSON.stringify(FULL) }
+  })
   on('process.run', (_$: any, e: any) => (runs.push(e.argv), { value: { exitCode: 0, stdout: '', stderr: '' } }))
   on('session.start', (_$: any, e: any) => ({ sessionId: 's', cwd: e.cwd }))
   on('command.register', () => ({ value: undefined }))
@@ -89,8 +104,17 @@ function engine(on: any, inbox: { mails: Mail[]; more?: Mail[]; fails?: boolean;
       return { value: { content: [{ type: 'resource', resource: { uri: SHEET, mimeType: 'application/vnd.ms-excel', blob: 'U0hFRVQ=' } }], isError: false } }
     }
     if (e.tool === READ && e.args.uri === NOTES) return answer('# Notes' + String.fromCharCode(10) + 'first')
-    if (e.tool === READ && e.args.uri === PHOTO) return { value: { content: [{ type: 'image', data: 'UE5H', mimeType: 'image/png' }], isError: false } }
-    if (e.tool === READ) return answer(JSON.stringify(FULL))
+    if (e.tool === READ && e.args.uri === PHOTO) {
+      const image = { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'UE5H' } }
+      const content = [{ type: 'text', text: `[Resource from Mail at ${PHOTO}] ` }, image, { type: 'text', text: '[Image: source: C:\\results\\blob.png]' }]
+      return { value: { content, isError: false } }
+    }
+    if (e.tool === READ && e.args.uri === REPORT) return answer('Quarterly report' + String.fromCharCode(10) + 'Totals')
+    if (e.tool === READ && e.args.uri === SCAN) {
+      return answer(JSON.stringify({ note: 'PDF text extraction failed.', attachment: { name: 'scan.pdf' }, messageUri: uriOf(ANA) }))
+    }
+    if (e.tool === READ && inbox.brokenMail) return { value: { content: [{ type: 'text', text: 'gone' }], isError: true } }
+    if (e.tool === READ) return tooLong(SAVED_MAIL)
     const isMore = e.args.offset === 2
     const listed = isMore ? (inbox.more ?? []) : inbox.mails
     const paging = !isMore && inbox.more ? [{ moreResults: true, nextOffset: 2 }] : []
@@ -188,6 +212,7 @@ describe('mail-pane', () => {
         '- budget.xlsx',
         '- notes.md',
         '- photo.png',
+        '- report.pdf.txt',
       ].join('\n'),
     )
     inbox.fills = false
@@ -210,7 +235,22 @@ describe('mail-pane', () => {
     await pane.press({ key: `view:${SHEET}` })
     expect(await pane.find({ type: 'Text', text: 'This file cannot be shown here. Save the mail to open it.' })).toBeDefined()
     await pane.press({ key: 'closePreview' })
+    await pane.press({ key: `view:${REPORT}` })
+    expect(await pane.find({ type: 'Code' })).toMatchObject({ props: { source: 'Quarterly report\nTotals', path: 'report.pdf' } })
+    await pane.press({ key: 'closePreview' })
+    await pane.press({ key: `view:${SCAN}` })
+    expect(await pane.find({ type: 'Text', text: 'The attachment scan.pdf cannot be read here: open it in Outlook.' })).toBeDefined()
     expect(await pane.find({ key: 'body' })).toBeDefined()
+  })
+
+  test('keeps the mail open with its preview when it cannot be read', OPTIONS, async ($, on) => {
+    engine(on, { mails: [ANA], brokenMail: true })
+    const pane = await startPane($)
+    await until(() => pane.find({ key: `mail:${uriOf(ANA)}` }))
+    await pane.press({ key: `mail:${uriOf(ANA)}` })
+    expect(await pane.find({ type: 'Text', text: 'That mail could not be read.' })).toBeDefined()
+    expect(await pane.find({ type: 'Text', text: 'Budget' })).toMatchObject({ props: { bold: true } })
+    expect(await pane.find({ key: 'body' })).toMatchObject({ props: { text: 'preview' } })
   })
 
   test('saves the mail and its attachments in a folder of their own', OPTIONS, async ($, on) => {
@@ -224,6 +264,8 @@ describe('mail-pane', () => {
     expect(mailFile?.text).toContain('From: Ana Ruiz <ana@example.com>')
     expect(mailFile?.text).toContain('Older words')
     expect(writes.find(one => one.path === `${FOLDER}/notes.md`)?.text).toBe('# Notes\nfirst')
+    expect(writes.find(one => one.path === `${FOLDER}/report.pdf.txt`)?.text).toBe('Quarterly report\nTotals')
+    expect(writes.some(one => one.path.includes('scan.pdf'))).toBe(false)
     expect(writes.filter(one => one.path.endsWith('.b64')).map(one => one.text)).toEqual(['U0hFRVQ=', 'UE5H'])
     expect(runs.map(argv => [argv[0], argv[argv.length - 1]?.replaceAll(String.fromCharCode(92), '/')])).toEqual([
       ['certutil', `${FOLDER}/budget.xlsx`],
@@ -238,7 +280,7 @@ describe('mail-pane', () => {
     await until(() => pane.find({ key: `mail:${uriOf(ANA)}` }))
     await pane.press({ key: `mail:${uriOf(ANA)}` })
     await pane.press({ key: 'save' })
-    expect(await pane.find({ type: 'Text', text: 'These could not be saved: budget.xlsx.' })).toBeDefined()
+    expect(await pane.find({ type: 'Text', text: 'These could not be saved: budget.xlsx, scan.pdf.' })).toBeDefined()
   })
 
   test('raises a toast for new mail from watched senders, after the first look', { options: { domain: 'example.com', watch: 'Ana Ruiz' } }, async ($, on) => {
