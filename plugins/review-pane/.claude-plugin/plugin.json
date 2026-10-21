@@ -1,0 +1,51 @@
+{
+  "name": "review-pane",
+  "version": "0.1.0",
+  "description": "Your pull requests and merge requests beside the chat: the GitHub and GitLab ones that wait for your review, yours and the ones you take part in, with their checks, a toast when someone asks for your review, and one press to review one in the chat. /reviews opens it.",
+  "author": {
+    "name": "IndagaLab",
+    "url": "https://github.com/DiegoFernandoLojanTenesaca"
+  },
+  "license": "MIT",
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "github": {
+      "type": "boolean",
+      "title": "GitHub",
+      "description": "Show the GitHub pull requests, read with gh.",
+      "default": true
+    },
+    "gitlab": {
+      "type": "boolean",
+      "title": "GitLab",
+      "description": "Show the GitLab merge requests, read with glab.",
+      "default": true
+    },
+    "gh": {
+      "type": "string",
+      "title": "gh command",
+      "description": "The GitHub CLI, signed in with gh auth login. A full path when it is not on the PATH.",
+      "default": "gh"
+    },
+    "glab": {
+      "type": "string",
+      "title": "glab command",
+      "description": "The GitLab CLI, signed in with glab auth login. A full path when it is not on the PATH.",
+      "default": "glab"
+    },
+    "refreshMinutes": {
+      "type": "number",
+      "title": "Refresh every (minutes)",
+      "description": "How often the pane looks again.",
+      "default": 5,
+      "min": 1,
+      "max": 120
+    },
+    "openOnStart": {
+      "type": "boolean",
+      "title": "Open on start",
+      "description": "Open the review pane when a session starts. Where /reviews does not run, this or asking Claude for the reviews opens it.",
+      "default": true
+    }
+  }
+}

@@ -1,0 +1,121 @@
+const en = {
+  title: 'Reviews',
+  commandDescription: 'Open the review pane beside the chat',
+  commandOpened: 'Review pane opened.',
+  bannerLine: '{review} · {open}',
+  reviewCount: '{count} to review',
+  openCount: '{count} open',
+  refresh: 'Refresh',
+  loading: 'Loading…',
+  back: 'Back',
+  github: 'GitHub',
+  gitlab: 'GitLab',
+  review: 'Asked to review',
+  mine: 'Yours',
+  assigned: 'Assigned to you',
+  involved: 'You take part',
+  recent: 'Closed lately',
+  empty: 'Nothing open.',
+  githubFailed: 'GitHub did not answer: check that gh is installed and signed in (gh auth login).',
+  gitlabFailed: 'GitLab did not answer: check that glab is installed and signed in (glab auth login).',
+  byLine: 'by {who}',
+  draft: 'draft',
+  conflicts: 'conflicts',
+  approved: 'approved',
+  changes: 'changes requested',
+  waiting: 'review pending',
+  merged: 'merged',
+  closed: 'closed',
+  passing: 'passed',
+  failing: 'failed',
+  pending: 'running',
+  pipeline: 'Pipeline',
+  checksHeading: 'Checks',
+  reviewersHeading: 'Reviewers',
+  branches: '{base} ← {head}',
+  diffLine: '+{additions} −{deletions} · {files} files',
+  filesLine: '{files} files',
+  noBody: 'No description.',
+  toChat: 'Review in the chat',
+  openGithub: 'Open in GitHub',
+  openGitlab: 'Open in GitLab',
+  pullRequest: 'pull request',
+  mergeRequest: 'merge request',
+  chatText: 'Review the {kind} {repo}{reference}: {title}\n{url}\n\nRead its changes with `{diff}` and tell me what you would change, file by file.',
+  newReview: '{who} asks you to review {repo}{reference}: {title}',
+  copied: 'The request was copied: paste it in the chat.',
+  detailFailed: 'Its details could not be read.',
+  chatFailed: 'It could not be passed to the chat.',
+  theme: 'Theme',
+}
+
+export type MessageKey = keyof typeof en
+
+const es: Record<MessageKey, string> = {
+  title: 'Revisiones',
+  commandDescription: 'Abre el panel de revisiones junto al chat',
+  commandOpened: 'Panel de revisiones abierto.',
+  bannerLine: '{review} · {open}',
+  reviewCount: '{count} por revisar',
+  openCount: '{count} abiertos',
+  refresh: 'Actualizar',
+  loading: 'Cargando…',
+  back: 'Volver',
+  github: 'GitHub',
+  gitlab: 'GitLab',
+  review: 'Te piden revisar',
+  mine: 'Tuyos',
+  assigned: 'Asignados a ti',
+  involved: 'Participas',
+  recent: 'Cerrados hace poco',
+  empty: 'Nada abierto.',
+  githubFailed: 'GitHub no respondió: revisa que gh esté instalado y con sesión (gh auth login).',
+  gitlabFailed: 'GitLab no respondió: revisa que glab esté instalado y con sesión (glab auth login).',
+  byLine: 'de {who}',
+  draft: 'borrador',
+  conflicts: 'conflictos',
+  approved: 'aprobado',
+  changes: 'piden cambios',
+  waiting: 'falta revisión',
+  merged: 'fusionado',
+  closed: 'cerrado',
+  passing: 'pasó',
+  failing: 'falló',
+  pending: 'en curso',
+  pipeline: 'Pipeline',
+  checksHeading: 'Comprobaciones',
+  reviewersHeading: 'Revisores',
+  branches: '{base} ← {head}',
+  diffLine: '+{additions} −{deletions} · {files} archivos',
+  filesLine: '{files} archivos',
+  noBody: 'Sin descripción.',
+  toChat: 'Revisar en el chat',
+  openGithub: 'Abrir en GitHub',
+  openGitlab: 'Abrir en GitLab',
+  pullRequest: 'pull request',
+  mergeRequest: 'merge request',
+  chatText: 'Revisa el {kind} {repo}{reference}: {title}\n{url}\n\nMira sus cambios con `{diff}` y dime qué cambiarías, archivo por archivo.',
+  newReview: '{who} te pide revisar {repo}{reference}: {title}',
+  copied: 'Se copió el pedido: pégalo en el chat.',
+  detailFailed: 'No se pudo leer el detalle.',
+  chatFailed: 'No se pudo pasar al chat.',
+  theme: 'Tema',
+}
+
+const LOCALES = {
+  en: { names: ['en', 'english', 'inglés'], messages: en },
+  es: { names: ['es', 'español', 'espanol', 'spanish', 'castellano'], messages: es },
+}
+
+export type Locale = keyof typeof LOCALES
+
+const BASE_LOCALE: Locale = 'en'
+
+export function localeOf(language: string | undefined): Locale {
+  const name = (language ?? '').trim().toLowerCase().split(/[-_\s]/)[0] ?? ''
+  const found = (Object.keys(LOCALES) as Locale[]).find(locale => LOCALES[locale].names.includes(name))
+  return found ?? BASE_LOCALE
+}
+
+export const translate = (locale: Locale, key: MessageKey, values: Record<string, string> = {}) =>
+  LOCALES[locale].messages[key].replace(/\{(\w+)\}/g, (whole, name: string) => values[name] ?? whole)
