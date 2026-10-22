@@ -17,6 +17,7 @@ import { ICONS } from './icons'
 import { LAYOUT } from './layout'
 import {
   clockOf,
+  complaintOf,
   cueIndexAt,
   hashOf,
   joinPath,
@@ -76,6 +77,7 @@ const PLAYED_LIMIT = 200
 const RADIO_SIZE = 25
 const END_SLACK_MS = 5_000
 const MAX_RETRIES = 2
+const HEARD_LIMIT = 4_000
 const VOLUME = { step: 10, least: 0, most: 100, initial: 100 }
 const RECONNECT = '--stream-lavf-o=reconnect=1,reconnect_streamed=1,reconnect_on_network_error=1,reconnect_delay_max=5'
 const PLAYER_SCRIPT = ['player', 'control.lua']
@@ -135,7 +137,8 @@ export type PlayerRun = { source: string; fromMs: number; level: number; script:
 export const playerArgs = ({ source, fromMs, level, script, control, run }: PlayerRun) => [
   '--no-video',
   '--no-config',
-  '--no-terminal',
+  '--quiet',
+  '--msg-level=all=warn',
   '--idle=no',
   ...(isStream(source) ? [RECONNECT] : []),
   `--volume=${level}`,
@@ -160,13 +163,20 @@ async function openPane($: EngineInterface) {
 }
 
 async function runJson<T>($: EngineInterface, argv: string[]): Promise<T> {
-  const out = await $.process.run(argv, { timeoutMs: YTDLP_TIMEOUT_MS })
+  const out = await $.process.run(argv, { timeoutMs: YTDLP_TIMEOUT_MS }).catch(async (error: unknown) => {
+    await setProblem($, { key: 'toolUnavailable', values: { tool: nameOf(argv[0] ?? '') } })
+    throw error
+  })
   if (out.exitCode !== 0) throw new Error(out.stderr)
   return JSON.parse(out.stdout) as T
 }
 
 async function setProblem($: EngineInterface, next: MusicProblem | null) {
   await update($, problem, () => next)
+}
+
+async function raiseProblem($: EngineInterface, next: MusicProblem) {
+  await update($, problem, current => (current?.key === 'toolUnavailable' ? current : next))
 }
 
 async function setBusy($: EngineInterface, next: MusicBusy | null) {
@@ -186,6 +196,7 @@ async function loadMemory($: EngineInterface) {
 }
 
 async function loadShelf($: EngineInterface, config: Config) {
+  await setProblem($, null)
   const [local, channel] = await Promise.all([
     config.library ? scanLibrary($, config.library).catch(() => undefined) : [],
     config.channel
@@ -202,7 +213,7 @@ async function loadShelf($: EngineInterface, config: Config) {
   ])
   const shelf = (await read($, albums)).filter(isBrowsable)
   await update($, album, current => (shelf.some(one => one.id === current) ? current : (shelf[0]?.id ?? '')))
-  await setProblem($, local === undefined ? { key: 'libraryMissing', values: { path: config.library } } : null)
+  if (local === undefined) await raiseProblem($, { key: 'libraryMissing', values: { path: config.library } })
   await loadAlbum($, config, await read($, album))
 }
 
@@ -212,7 +223,7 @@ async function loadAlbum($: EngineInterface, config: Config, albumId: string) {
   await setBusy($, 'album')
   const listing = await runJson<YoutubeListing>($, [config.ytdlp, '--flat-playlist', '-J', target.url]).catch(() => undefined)
   await setBusy($, null)
-  if (!listing) return setProblem($, { key: 'youtubeFailed', values: { url: target.url } })
+  if (!listing) return raiseProblem($, { key: 'youtubeFailed', values: { url: target.url } })
   const tracks = youtubeTracksOf(albumId, listing, config.artist)
   await update($, albums, current => current.map(one => (one.id === albumId ? { ...one, tracks, isLoaded: true } : one)))
 }
@@ -231,7 +242,7 @@ async function addLink($: EngineInterface, config: Config, link: string) {
   const listing = await runJson<YoutubeListing>($, [config.ytdlp, '--flat-playlist', '-J', link]).catch(() => undefined)
   await setBusy($, null)
   if (!listing) {
-    await setProblem($, { key: 'youtubeFailed', values: { url: link } })
+    await raiseProblem($, { key: 'youtubeFailed', values: { url: link } })
     return undefined
   }
   const added = linkAlbumOf(link, listing, config.artist)
@@ -285,7 +296,7 @@ async function search($: EngineInterface, config: Config, query: string): Promis
     ...(online ? youtubeTracksOf(id, online, config.artist) : []),
   ]
   if (tracks.length === 0) {
-    await setProblem($, { key: 'nothingFound', values: { query: wanted } })
+    await raiseProblem($, { key: 'nothingFound', values: { query: wanted } })
     return local.suggestion?.track
   }
   await shelve($, listingAlbumOf(id, wanted, 'search', tracks), one => one.source === 'search')
@@ -377,7 +388,7 @@ async function remember($: EngineInterface, track: MusicTrack) {
 async function fail($: EngineInterface, run: number, reason: MusicProblem) {
   if (run !== generation) return
   await update($, playback, () => null)
-  await setProblem($, reason)
+  await raiseProblem($, reason)
 }
 
 async function stop($: EngineInterface) {
@@ -411,11 +422,15 @@ async function listen(
   let lastMs = fromMs
   let lengthMs = ready.durationMs
   let hasPlayed = false
+  let hasStarted = false
+  let heard = ''
   const argv = [config.player, ...playerArgs({ source: ready.source, fromMs, level, script, control, run })]
   live = run
   try {
     for await (const piece of $.process.spawn({ argv })) {
+      hasStarted = true
       if (run !== generation) return
+      if (!hasPlayed && heard.length < HEARD_LIMIT) heard += piece.text
       const report = reportOf(piece.text)
       const durationMs = report.lengthMs
       if (durationMs !== undefined && durationMs !== lengthMs) {
@@ -431,11 +446,17 @@ async function listen(
       shown = mark
       await update($, playback, current => (current?.trackId === track.id ? { ...current, positionMs } : current))
     }
+  } catch (error) {
+    if (hasStarted) throw error
+    return fail($, run, { key: 'toolUnavailable', values: { tool: nameOf(config.player) } })
   } finally {
     if (live === run) live = undefined
   }
   if (run !== generation) return
   const player = nameOf(config.player)
+  if (!hasPlayed && isStream(ready.source) && attempt < MAX_RETRIES) return play($, config, track, fromMs, undefined, attempt + 1)
+  const reason = complaintOf(heard)
+  if (!hasPlayed && reason) return fail($, run, { key: 'playerFailedReason', values: { player, title: track.title, reason } })
   if (!hasPlayed) return fail($, run, { key: 'playerFailed', values: { player, title: track.title } })
   const isCut = lengthMs !== undefined && lastMs < lengthMs - END_SLACK_MS
   if (isCut && attempt < MAX_RETRIES) return play($, config, track, lastMs, undefined, attempt + 1)

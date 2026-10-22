@@ -9,7 +9,7 @@
     {
       "name": "music-pane",
       "description": "A music player beside the chat: your albums and YouTube, a search by title, singer or a line of the lyrics, similar songs after each one, the cover, a progress bar and the lyric line being sung. /music opens it.",
-      "version": "0.7.0",
+      "version": "0.7.1",
       "source": "./plugins/music-pane",
       "category": "Music",
       "tags": [

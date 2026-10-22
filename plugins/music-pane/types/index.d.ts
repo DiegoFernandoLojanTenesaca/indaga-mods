@@ -56,7 +56,7 @@ export type MusicSuggestion = {
 export type MusicBusy = 'album' | 'search' | 'radio'
 
 export type MusicProblem = {
-  key: 'libraryMissing' | 'playerFailed' | 'youtubeFailed' | 'nothingFound'
+  key: 'libraryMissing' | 'playerFailed' | 'playerFailedReason' | 'toolUnavailable' | 'youtubeFailed' | 'nothingFound'
   values?: Record<string, string>
 }
 

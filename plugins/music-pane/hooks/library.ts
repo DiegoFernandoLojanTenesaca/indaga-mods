@@ -13,6 +13,9 @@ const MARKUP = /<[^>]*>|\{[^}]*\}/g
 const NOTES = /^[\s♪♫]+|[\s♪♫]+$/g
 const MUSIC_NOTE = '♪'
 const REPORT = /@(pos|len) (\d+(?:\.\d+)?)/g
+const REPORT_MARK = '@'
+const WEB_ADDRESS = /\S+:\/\/\S+/g
+const COMPLAINT_LIMIT = 160
 const NUMBERED = /^(\d+)\s*-\s*(.+)$/
 const YOUTUBE_SEARCH = 'https://www.youtube.com/results?search_query='
 
@@ -132,6 +135,13 @@ export function reportOf(output: string) {
   }
   return report
 }
+
+export const complaintOf = (output: string) =>
+  output
+    .split(LINE_BREAK)
+    .map(line => line.replace(WEB_ADDRESS, '').trim())
+    .find(line => line !== '' && !line.startsWith(REPORT_MARK))
+    ?.slice(0, COMPLAINT_LIMIT)
 
 export function clockOf(positionMs: number) {
   const seconds = Math.max(0, Math.floor(positionMs / 1000))

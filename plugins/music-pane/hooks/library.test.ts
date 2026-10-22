@@ -2,6 +2,7 @@ import { describe, expect, test } from 'claude-code/testing'
 
 import {
   clockOf,
+  complaintOf,
   coverOf,
   cueIndexAt,
   hashOf,
@@ -78,6 +79,14 @@ describe('library', () => {
     expect(reportOf(lines)).toEqual({ positionMs: 10292, lengthMs: 211248 })
     expect(reportOf('@pos 3')).toEqual({ positionMs: 3000 })
     expect(reportOf('[ffmpeg] No such file or directory')).toEqual({})
+  })
+
+  test("takes the player's first complaint, without its long address", () => {
+    const said = ['@len 3.000', '[ffmpeg] https: HTTP error 403 Forbidden', 'Failed to open https://cdn.example/a?b=c.', ''].join(CRLF)
+    expect(complaintOf(said)).toBe('[ffmpeg] https: HTTP error 403 Forbidden')
+    expect(complaintOf(['@pos 1.000', 'Failed to open https://cdn.example/a?b=c', ''].join(CRLF))).toBe('Failed to open')
+    expect(complaintOf(['@pos 1.000', ''].join(LINE))).toBeUndefined()
+    expect(complaintOf('x'.repeat(500))).toHaveLength(160)
   })
 
   test("reads the track number and the album's cover", () => {

@@ -27,6 +27,7 @@ const IDLE = 'Search a song, a singer or a line of the lyrics.'
 const SONG_LENGTH_S = 180
 const CRLF = String.fromCharCode(13, 10)
 const RECONNECT = '--stream-lavf-o=reconnect=1,reconnect_streamed=1,reconnect_on_network_error=1,reconnect_delay_max=5'
+const MISSING = 'nowhere'
 
 const dir = (name: string) => ({ name, kind: 'dir', size: 0, mtimeMs: 0, isLink: false })
 const file = (name: string) => ({ name, kind: 'file', size: 1, mtimeMs: 0, isLink: false })
@@ -100,6 +101,7 @@ function engine(on: any, songs: Record<string, Song>) {
   on('process.run', (_$: any, e: any) => {
     const argv: string[] = e.argv
     runs.push(argv)
+    if (argv[0] === MISSING) throw new Error(`${MISSING} not found`)
     if (argv[0] === 'ffmpeg') return { value: { exitCode: 0, stdout: '', stderr: '' } }
     const answer = YOUTUBE[argv.at(-1)!]
     return { value: answer ? { exitCode: 0, stdout: JSON.stringify(answer), stderr: '' } : { exitCode: 1, stdout: '', stderr: 'ERROR' } }
@@ -110,6 +112,7 @@ function engine(on: any, songs: Record<string, Song>) {
     const song = songs[source] ?? { positions: [], holds: false }
     const last = song.positions.at(-1) ?? 0
     spawned.push(e.argv)
+    if (e.argv[0] === MISSING) throw new Error(`${MISSING} not found`)
     try {
       yield { stream: 'stdout', text: song.positions.length > 0 ? line('len', song.lengthS ?? last + 1) : `Failed to open${CRLF}` }
       for (const seconds of song.positions) {
@@ -162,7 +165,7 @@ describe('music-pane', () => {
       const playing = pane.press({ key: `shelf:${ALBUM}|${FIRST}` })
       await until(async () => pulls.count >= 4)
       const argv = spawned[0]!
-      expect(argv.slice(0, 7)).toEqual(['mpv', '--no-video', '--no-config', '--no-terminal', '--idle=no', '--volume=100', '--start=0.000'])
+      expect(argv.slice(0, 8)).toEqual(['mpv', '--no-video', '--no-config', '--quiet', '--msg-level=all=warn', '--idle=no', '--volume=100', '--start=0.000'])
       expect(option(argv, 'script')).toMatch(/[\\/]player[\\/]control\.lua$/)
       expect(option(argv, 'script-opts')).toMatch(/^music-pane-control=.*music-pane-control\.json,music-pane-run=\d+$/)
       expect(argv).not.toContain(RECONNECT)
@@ -295,13 +298,42 @@ describe('music-pane', () => {
     await pane.unmount()
   })
 
-  test('says so when the player never plays, and does not skip ahead', OPTIONS, async ($, on) => {
+  test('says why the player never played, and does not skip ahead', OPTIONS, async ($, on) => {
     const { spawned } = engine(on, {})
     const pane = await startPane($)
     await until(() => pane.find({ key: `shelf:${ALBUM}|${FIRST}` }))
     await pane.press({ key: `shelf:${ALBUM}|${FIRST}` })
-    expect(await pane.find({ type: 'Text', text: 'mpv could not play 01 - Song.' })).toBeDefined()
+    expect(await pane.find({ type: 'Text', text: 'mpv could not play 01 - Song: Failed to open' })).toBeDefined()
     expect(spawned).toHaveLength(1)
+    await pane.unmount()
+  })
+
+  test('says the player cannot run when it is not there', { options: { ...OPTIONS.options, player: MISSING } }, async ($, on) => {
+    engine(on, {})
+    const pane = await startPane($)
+    await until(() => pane.find({ key: `shelf:${ALBUM}|${FIRST}` }))
+    await pane.press({ key: `shelf:${ALBUM}|${FIRST}` })
+    expect(await pane.find({ type: 'Text', text: `Could not run ${MISSING}. Install it, or set its full path in the mod options.` })).toBeDefined()
+    await pane.unmount()
+  })
+
+  test("asks YouTube again for a video's audio that never played, then says why", CHANNEL, async ($, on) => {
+    const { spawned, runs } = engine(on, {})
+    const pane = await startPane($)
+    await until(() => pane.find({ key: `shelf:${PLAYLIST}|${VIDEO}` }))
+    await pane.press({ key: `shelf:${PLAYLIST}|${VIDEO}` })
+    await until(() => pane.find({ type: 'Text', text: /could not play .*: Failed to open$/ }))
+    expect(spawned).toHaveLength(3)
+    expect(runs.filter(argv => argv.at(-1) === VIDEO)).toHaveLength(3)
+    await pane.unmount()
+  })
+
+  test('says yt-dlp cannot run instead of finding nothing', { options: { ...OPTIONS.options, ytdlp: MISSING } }, async ($, on) => {
+    engine(on, {})
+    const pane = await startPane($)
+    await until(() => pane.find({ key: 'search' }))
+    await pane.input({ key: 'search', text: 'Nothing like this' })
+    expect(await pane.find({ type: 'Text', text: `Could not run ${MISSING}. Install it, or set its full path in the mod options.` })).toBeDefined()
     await pane.unmount()
   })
 
