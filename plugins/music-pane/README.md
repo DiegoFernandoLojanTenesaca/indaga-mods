@@ -20,6 +20,18 @@ In the desktop app, where `/plugin` does not run: click + next to the prompt box
 
 It needs [mpv](https://mpv.io/installation/) to play, `ffmpeg` from [FFmpeg](https://ffmpeg.org/download.html) for the covers, and [yt-dlp](https://github.com/yt-dlp/yt-dlp) for YouTube. The mod hands mpv a small Lua script of its own (`player/control.lua`) that reads a control file the mod writes, so volume and pause change while the song plays, with no gap and nothing heard twice.
 
+On Windows:
+
+```
+winget install mpv-player.mpv-CI.MSVC
+winget install yt-dlp.yt-dlp
+winget install Gyan.FFmpeg
+```
+
+A program installed while Claude Code (or the app that runs it) was open is found once that app starts again; or set its full path in the `player`, `ytdlp` and `ffmpeg` options. Keep yt-dlp current (`winget upgrade yt-dlp.yt-dlp`): YouTube changes often, and an old yt-dlp stops reading it.
+
+mpv plays on the computer where Claude Code runs. From an app that reaches that computer from elsewhere (CConnect on a phone, say), the sound comes out of that computer.
+
 ## Options
 
 | Option | What it is |
@@ -73,5 +85,12 @@ Once something plays, from the top: the search field, then the results of the la
 
 Search, or pick an album in the library, then a song. ❚❚ pauses and ⏵ goes on from the same instant. Drag or click the volume bar, as on YouTube; where the surface has no such bar (the phone, the editor), − and + move it by 10. The color dots at the bottom of the pane pick the theme (pink, red, orange, yellow, green, cyan, blue or purple), which colors the play button, the bars, the banner, the line being sung and the song playing. Volume and theme are kept for the next session.
 
-A YouTube song is read over a connection YouTube sometimes drops; mpv reconnects, and a song that still ends more than five seconds early starts again where it stopped, twice at most, instead of skipping to the next one. 
+A YouTube song is read over a connection YouTube sometimes drops; mpv reconnects, and a song that still ends more than five seconds early starts again where it stopped, twice at most, instead of skipping to the next one. A YouTube song that never starts is asked of YouTube again, twice at most, before the pane gives up on it.
+
+## When it does not play
+
+The pane says why, in mpv's own words where it has them:
+
+- **Could not run mpv:** mpv is not installed, or not where the `player` option says. The same message names yt-dlp when a search or a YouTube song cannot run it.
+- **mpv could not play a song, and the reason:** mpv started and gave up on that song, as with `HTTP error 403 Forbidden` from YouTube. Update yt-dlp first when YouTube songs stop playing.
 The small covers are made once with `ffmpeg` and kept in the system's temporary folder. Nothing else leaves your computer but what YouTube is asked for.
