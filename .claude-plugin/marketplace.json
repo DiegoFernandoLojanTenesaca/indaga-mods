@@ -44,6 +44,18 @@
         "gitlab",
         "toast"
       ]
+    },
+    {
+      "name": "xyra-alert",
+      "description": "Toasts from Xyra while you work with Claude: a League of Legends match found, accepted, back in the queue, and the game starting with your champion.",
+      "version": "0.1.0",
+      "source": "./plugins/xyra-alert",
+      "category": "Gaming",
+      "tags": [
+        "toast",
+        "league-of-legends",
+        "xyra"
+      ]
     }
   ]
 }

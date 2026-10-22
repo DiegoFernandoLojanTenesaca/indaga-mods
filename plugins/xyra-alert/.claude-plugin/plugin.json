@@ -1,0 +1,18 @@
+{
+  "name": "xyra-alert",
+  "version": "0.1.0",
+  "description": "Toasts from Xyra while you work with Claude: a League of Legends match found, accepted, back in the queue, and the game starting with your champion.",
+  "author": {
+    "name": "IndagaLab",
+    "url": "https://github.com/DiegoFernandoLojanTenesaca"
+  },
+  "license": "MIT",
+  "userConfig": {
+    "address": {
+      "type": "string",
+      "title": "Xyra address",
+      "description": "Where Xyra's phone link answers.",
+      "default": "http://127.0.0.1:47811"
+    }
+  }
+}

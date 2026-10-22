@@ -7,6 +7,7 @@ Claude Code mods by IndagaLab. Each one lives in `plugins/<name>/` with its own 
 | [`music-pane`](plugins/music-pane) | A music player in a pane beside the chat: your albums and YouTube, a search by title, singer or a line of the lyrics, similar songs after each one, the cover, a progress bar and the lyric line being sung. | mpv, yt-dlp and ffmpeg (see its README) |
 | [`mail-pane`](plugins/mail-pane) | Your latest mail in a pane beside the chat, through the Microsoft 365 connector: one sender domain or the whole inbox, read in the pane, passed to the chat, a toast when new mail comes in. | The Microsoft 365 connector, connected |
 | [`review-pane`](plugins/review-pane) | Your GitHub pull requests and GitLab merge requests in a pane beside the chat: what waits for your review, yours and the ones you take part in, or every one of a project you pick, with their checks, and one press to review one in the chat. | `gh` or `glab`, signed in |
+| [`xyra-alert`](plugins/xyra-alert) | Toasts from Xyra while you work: a League of Legends match found, accepted, back in the queue, and the game starting with your champion. | [Xyra](https://xyra-app.pages.dev) with its phone link on |
 
 ## Install
 
