@@ -28,6 +28,18 @@ const SONG_LENGTH_S = 180
 const CRLF = String.fromCharCode(13, 10)
 const RECONNECT = '--stream-lavf-o=reconnect=1,reconnect_streamed=1,reconnect_on_network_error=1,reconnect_delay_max=5'
 const MISSING = 'nowhere'
+const SESSION = 'chat-1'
+const CONTROL_PATH = new RegExp(`music-pane-control-${SESSION}\\.json$`)
+const FAR_RIGHT = 10_000
+const PAUSED_AT = {
+  albumId: ALBUM,
+  trackId: FIRST,
+  positionMs: 1200,
+  durationMs: SONG_LENGTH_S * 1000,
+  source: FIRST,
+  isPlaying: false,
+  isLoading: false,
+}
 
 const dir = (name: string) => ({ name, kind: 'dir', size: 0, mtimeMs: 0, isLink: false })
 const file = (name: string) => ({ name, kind: 'file', size: 1, mtimeMs: 0, isLink: false })
@@ -83,7 +95,8 @@ function engine(on: any, songs: Record<string, Song>) {
     sets.push({ key: e.key, value: e.value })
     return next(e)
   })
-  on('session.start', (_$: any, e: any) => ({ sessionId: 's', cwd: e.cwd }))
+  on('session.start', (_$: any, e: any) => ({ sessionId: SESSION, cwd: e.cwd }))
+  on('session.id', () => ({ value: SESSION }))
   on('command.register', () => ({ value: undefined }))
   on('tool.register', (_$: any, e: any) => ({ value: { tool: `mcp__music-pane__${e.name}` } }))
   on('settings.read', () => ({ value: { language: 'English' } }))
@@ -130,7 +143,7 @@ function engine(on: any, songs: Record<string, Song>) {
     }
     return { value: { code: 0, signal: null } }
   })
-  const control = () => JSON.parse(writes.filter(one => one.path.endsWith('music-pane-control.json')).at(-1)?.text ?? '{}')
+  const control = () => JSON.parse(writes.filter(one => CONTROL_PATH.test(one.path)).at(-1)?.text ?? '{}')
   const lastSet = (key: string) => sets.filter(one => one.key === key).at(-1)?.value
   return { spawned, stopped, pulls, opened, runs, stored, control, seeded, lastSet }
 }
@@ -167,7 +180,7 @@ describe('music-pane', () => {
       const argv = spawned[0]!
       expect(argv.slice(0, 8)).toEqual(['mpv', '--no-video', '--no-config', '--quiet', '--msg-level=all=warn', '--idle=no', '--volume=100', '--start=0.000'])
       expect(option(argv, 'script')).toMatch(/[\\/]player[\\/]control\.lua$/)
-      expect(option(argv, 'script-opts')).toMatch(/^music-pane-control=.*music-pane-control\.json,music-pane-run=\d+$/)
+      expect(option(argv, 'script-opts')).toMatch(new RegExp(`^music-pane-control=.*music-pane-control-${SESSION}\\.json,music-pane-run=\\d+$`))
       expect(argv).not.toContain(RECONNECT)
       expect(argv.at(-1)).toBe(FIRST)
       expect(control()).toMatchObject({ volume: 100, pause: false })
@@ -194,6 +207,47 @@ describe('music-pane', () => {
       await pane.unmount()
     })
   }
+
+  for (const surface of SURFACES) {
+    test(`drags the progress bar to seek without starting the player again on ${surface}`, OPTIONS, async ($, on) => {
+      const { spawned, stopped, pulls, control, lastSet, seeded } = engine(on, { [FIRST]: { positions: [1.2], holds: true, lengthS: SONG_LENGTH_S } })
+      seeded.set('playback', PAUSED_AT)
+      const pane = await startPane($, surface)
+      await until(() => pane.find({ key: 'progress' }))
+      const playing = pane.press({ key: 'toggle' })
+      await until(async () => pulls.count >= 2)
+      expect(spawned[0]).toContain('--start=1.200')
+
+      const grabbed = pane.pointer({ type: 'down', x: 0, y: 0, button: 'left', in: 'progress' })
+      const dragged = pane.pointer({ type: 'move', x: FAR_RIGHT, y: 0, button: 'left', in: 'progress' })
+      await pause()
+      expect(control().seekId).toBeUndefined()
+      const released = pane.pointer({ type: 'up', x: FAR_RIGHT, y: 0, button: 'left', in: 'progress' })
+      await until(async () => control().seekId === 1)
+      expect(control()).toMatchObject({ seek: SONG_LENGTH_S, pause: false })
+      expect(lastSet('playback')).toMatchObject({ positionMs: SONG_LENGTH_S * 1000 })
+      expect(spawned).toHaveLength(1)
+
+      const stopping = pane.press({ key: 'stop' })
+      await Promise.all([playing, grabbed, dragged, released, stopping])
+      expect(stopped).toEqual([FIRST])
+      await pane.unmount()
+    })
+  }
+
+  test('moves where a paused song goes on from when the player is not running', OPTIONS, async ($, on) => {
+    const { spawned, control, lastSet, seeded } = engine(on, { [FIRST]: { positions: [], holds: false } })
+    seeded.set('playback', PAUSED_AT)
+    const pane = await startPane($)
+    await until(() => pane.find({ key: 'progress' }))
+    await pane.pointer({ type: 'down', x: FAR_RIGHT, y: 0, button: 'left', in: 'progress' })
+    await pane.pointer({ type: 'up', x: FAR_RIGHT, y: 0, button: 'left', in: 'progress' })
+    expect(lastSet('playback')).toMatchObject({ positionMs: SONG_LENGTH_S * 1000, isPlaying: false })
+    expect(control().seekId).toBeUndefined()
+    await pane.press({ key: 'toggle' })
+    expect(spawned[0]).toContain(`--start=${SONG_LENGTH_S.toFixed(3)}`)
+    await pane.unmount()
+  })
 
   test('draws the song playing in the chosen theme', OPTIONS, async ($, on) => {
     const { stored, seeded } = engine(on, {})
@@ -230,7 +284,8 @@ describe('music-pane', () => {
     expect(await pane.find({ type: 'Text', text: ICONS.play })).toMatchObject({ props: { color: THEMES.blue } })
     expect(await pane.find({ type: 'Text', text: '80 %' })).toBeDefined()
     expect(await pane.find({ key: 'volume' })).toBeDefined()
-    expect(await pane.findAll({ type: 'Svg' })).toHaveLength(2)
+    expect(await pane.find({ key: 'progress' })).toBeDefined()
+    expect(await pane.findAll({ type: 'Svg' })).toHaveLength(1)
     expect(await pane.find({ key: 'theme:blue', text: ICONS.themeChosen })).toBeDefined()
     await pane.unmount()
   })

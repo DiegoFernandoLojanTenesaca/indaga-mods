@@ -81,7 +81,10 @@ const HEARD_LIMIT = 4_000
 const VOLUME = { step: 10, least: 0, most: 100, initial: 100 }
 const RECONNECT = '--stream-lavf-o=reconnect=1,reconnect_streamed=1,reconnect_on_network_error=1,reconnect_delay_max=5'
 const PLAYER_SCRIPT = ['player', 'control.lua']
-const CONTROL_FILE = 'music-pane-control.json'
+const CONTROL_FILE = { prefix: 'music-pane-control-', suffix: '.json' }
+const UNSAFE_NAME = /[^\w-]/g
+const SLIDER = { volume: 'volume', progress: 'progress' }
+const MS_PER_SECOND = 1000
 const STORE = { theme: 'theme', volume: 'volume', history: 'history' }
 const HISTORY = 'history'
 const COVER_PREFIX = `music-pane-cover-${LAYOUT.coverWidth}x${LAYOUT.coverHeight}-`
@@ -110,6 +113,7 @@ type Ready = { source: string; sung: MusicLyrics; durationMs?: number }
 
 let generation = 0
 let live: number | undefined
+let seeks = 0
 let wantedCover: string | undefined
 let locale: Promise<Locale> | undefined
 const lineCache = new Map<string, string[]>()
@@ -397,11 +401,13 @@ async function stop($: EngineInterface) {
 }
 
 async function controlPathOf($: EngineInterface) {
-  return joinPath(await tempFolderOf($), CONTROL_FILE)
+  const session = (await $.session.id()).replace(UNSAFE_NAME, '_')
+  return joinPath(await tempFolderOf($), `${CONTROL_FILE.prefix}${session}${CONTROL_FILE.suffix}`)
 }
 
-async function steer($: EngineInterface, run: number, isPaused: boolean) {
-  await $.fs.write(await controlPathOf($), JSON.stringify({ run, volume: await read($, volume), pause: isPaused }))
+async function steer($: EngineInterface, run: number, isPaused: boolean, seekMs?: number) {
+  const seek = seekMs === undefined ? {} : { seek: seekMs / MS_PER_SECOND, seekId: ++seeks }
+  await $.fs.write(await controlPathOf($), JSON.stringify({ run, volume: await read($, volume), pause: isPaused, ...seek }))
 }
 
 async function listen(
@@ -553,6 +559,13 @@ async function setVolume($: EngineInterface, wanted: number, isKept: boolean) {
   if (isKept) await $.store.set(STORE.volume, level)
 }
 
+async function seekTo($: EngineInterface, positionMs: number) {
+  const current = await read($, playback)
+  if (!current || current.isLoading) return
+  await update($, playback, now => now && { ...now, positionMs })
+  if (live === generation) await steer($, generation, !current.isPlaying, positionMs)
+}
+
 async function changeVolume($: EngineInterface, step: number) {
   await setVolume($, (await read($, volume)) + step, true)
 }
@@ -612,8 +625,11 @@ export const register: Register = (on, options) => {
   })
 
   on('ui.message', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const sent = e.data as { volume?: unknown; isDone?: unknown } | null
-    if (typeof sent?.volume === 'number') await setVolume($, sent.volume, sent.isDone === true)
+    const sent = e.data as { level?: unknown; isDone?: unknown } | null
+    if (typeof sent?.level !== 'number') return {}
+    const isDone = sent.isDone === true
+    if (e.element === SLIDER.volume) await setVolume($, sent.level, isDone)
+    if (e.element === SLIDER.progress && isDone) await seekTo($, sent.level * MS_PER_SECOND)
     return {}
   })
 
@@ -712,7 +728,7 @@ export const register: Register = (on, options) => {
           knob: ICONS.sliderKnob,
           empty: ICONS.sliderEmpty,
         }
-        return <Client key="volume" module="./slider.tsx" width={LAYOUT.sliderColumns} props={slider} />
+        return <Client key={SLIDER.volume} module="./slider.tsx" width={LAYOUT.sliderColumns} props={slider} />
       }
       return (
         <Box flexDirection="row" gap={LAYOUT.buttonGap}>
@@ -809,7 +825,24 @@ export const register: Register = (on, options) => {
         ? t('didYouMeanLine', { line: offer.line, title: splitTitle(offer.track.title).name })
         : t('didYouMean', { title: splitTitle(offer.track.title).name })
       : ''
-    const { welcome, cover: coverArt, progress } = artwork()
+    const { welcome, cover: coverArt, progress: drawnProgress } = artwork()
+    const lengthSeconds = Math.floor((now?.durationMs ?? 0) / MS_PER_SECOND)
+    const seekBar = () => {
+      if ((e.surface !== 'terminal' && e.surface !== 'desktop') || lengthSeconds < 1 || !now) return drawnProgress
+      const { Client } = $.ui.resolve(e)
+      const slider = {
+        level: Math.round(now.positionMs / MS_PER_SECOND),
+        least: 0,
+        most: lengthSeconds,
+        accent,
+        filled: ICONS.sliderFilled,
+        knob: ICONS.sliderKnob,
+        empty: ICONS.sliderEmpty,
+      }
+      const width = e.surface === 'terminal' ? LAYOUT.barColumns : LAYOUT.seekWidth
+      return <Client key={SLIDER.progress} module="./slider.tsx" width={width} props={slider} />
+    }
+    const progress = seekBar()
 
     return (
       <Box flexDirection="column" gap={LAYOUT.sectionGap}>

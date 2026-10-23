@@ -4,6 +4,7 @@ local options = { control = '', run = '' }
 require('mp.options').read_options(options, 'music-pane')
 
 local seen = ''
+local sought = nil
 
 local function report(kind, value)
   io.stdout:write(string.format('@%s %s\n', kind, value))
@@ -21,6 +22,10 @@ mp.add_periodic_timer(0.1, function()
   if type(wanted) ~= 'table' or tostring(wanted.run) ~= options.run then return end
   if type(wanted.volume) == 'number' then mp.set_property_number('volume', wanted.volume) end
   if type(wanted.pause) == 'boolean' then mp.set_property_bool('pause', wanted.pause) end
+  if type(wanted.seek) == 'number' and wanted.seekId ~= nil and wanted.seekId ~= sought then
+    sought = wanted.seekId
+    mp.commandv('seek', tostring(wanted.seek), 'absolute+exact')
+  end
 end)
 
 mp.add_periodic_timer(0.25, function()

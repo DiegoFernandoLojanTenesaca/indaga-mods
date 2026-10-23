@@ -25,7 +25,7 @@ const Slider: ClientModule<SliderProps, SliderState> = (props, surface) => {
     const isDragging = event.type === 'down' || (event.type === 'move' && event.button !== undefined)
     if (!isDragging && event.type !== 'up') return
     const level = levelAt(event.fine?.x ?? event.x)
-    if (level !== surface.state?.level || !isDragging) surface.post({ volume: level, isDone: !isDragging })
+    if (level !== surface.state?.level || !isDragging) surface.post({ level, isDone: !isDragging })
     surface.setState({ level, isDragging })
   })
   const knobAt = Math.round(((shown - props.least) / span) * (columns - 1))

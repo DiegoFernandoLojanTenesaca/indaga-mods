@@ -18,7 +18,7 @@ claude plugin install music-pane --marketplace DiegoFernandoLojanTenesaca/indaga
 
 In the desktop app, where `/plugin` does not run: click + next to the prompt box, then Plugins, Add marketplace with `DiegoFernandoLojanTenesaca/indaga-mods`, then Add plugin.
 
-It needs [mpv](https://mpv.io/installation/) to play, `ffmpeg` from [FFmpeg](https://ffmpeg.org/download.html) for the covers, and [yt-dlp](https://github.com/yt-dlp/yt-dlp) for YouTube. The mod hands mpv a small Lua script of its own (`player/control.lua`) that reads a control file the mod writes, so volume and pause change while the song plays, with no gap and nothing heard twice.
+It needs [mpv](https://mpv.io/installation/) to play, `ffmpeg` from [FFmpeg](https://ffmpeg.org/download.html) for the covers, and [yt-dlp](https://github.com/yt-dlp/yt-dlp) for YouTube. The mod hands mpv a small Lua script of its own (`player/control.lua`) that reads a control file the mod writes, one per chat, so volume, pause and a jump in the song change while it plays, with no gap and nothing heard twice, and a chat never steers the player of another.
 
 On Windows:
 
@@ -83,7 +83,7 @@ Once something plays, from the top: the search field, then the results of the la
 
 ## Using it
 
-Search, or pick an album in the library, then a song. ❚❚ pauses and ⏵ goes on from the same instant. Drag or click the volume bar, as on YouTube; where the surface has no such bar (the phone, the editor), − and + move it by 10. The color dots at the bottom of the pane pick the theme (pink, red, orange, yellow, green, cyan, blue or purple), which colors the play button, the bars, the banner, the line being sung and the song playing. Volume and theme are kept for the next session.
+Search, or pick an album in the library, then a song. ❚❚ pauses and ⏵ goes on from the same instant. Drag or click the progress bar to move through the song, as on YouTube: the player jumps there when you let go, without starting again, and a paused song goes on from there (the phone and the editor show the bar without moving it). Drag or click the volume bar too; where the surface has no such bar (the phone, the editor), − and + move it by 10. The color dots at the bottom of the pane pick the theme (pink, red, orange, yellow, green, cyan, blue or purple), which colors the play button, the bars, the banner, the line being sung and the song playing. Volume and theme are kept for the next session.
 
 A YouTube song is read over a connection YouTube sometimes drops; mpv reconnects, and a song that still ends more than five seconds early starts again where it stopped, twice at most, instead of skipping to the next one. A YouTube song that never starts is asked of YouTube again, twice at most, before the pane gives up on it.
 

@@ -12,6 +12,7 @@ export const LAYOUT = {
   barHeight: 10,
   barColumns: 24,
   sliderColumns: 24,
+  seekWidth: '100%',
   welcome: {
     width: 1000,
     height: 300,
