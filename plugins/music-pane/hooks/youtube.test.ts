@@ -10,6 +10,7 @@ import {
   linkAlbumOf,
   playlistsUrlOf,
   subtitleUrlOf,
+  wholeAudioUrlOf,
   youtubeTracksOf,
 } from './youtube'
 
@@ -63,6 +64,15 @@ describe('youtube', () => {
     const single = linkAlbumOf('https://youtu.be/v9', { id: 'v9', title: 'Band - Nine (Lyric Video)', webpage_url: 'https://www.youtube.com/watch?v=v9' }, 'Band')
     expect(single.name).toBe('Nine')
     expect(single.tracks.map(track => track.title)).toEqual(['Nine'])
+  })
+
+  test('asks YouTube for a whole song at once, and leaves a long one as it came', () => {
+    const stream = 'https://cdn.example/videoplayback?itag=251&clen=3610795'
+    const bare = 'https://cdn.example/videoplayback?itag=251'
+    expect(wholeAudioUrlOf(stream, 3_610_795)).toBe(`${stream}&range=0-3610794`)
+    expect(wholeAudioUrlOf(stream, undefined)).toBe(`${stream}&range=0-3610794`)
+    expect(wholeAudioUrlOf(stream, 63_100_000)).toBe(stream)
+    expect(wholeAudioUrlOf(bare, null)).toBe(bare)
   })
 
   test('prefers uploaded srt subtitles in the reader language', () => {

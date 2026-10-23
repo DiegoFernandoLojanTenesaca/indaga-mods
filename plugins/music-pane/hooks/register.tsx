@@ -46,6 +46,7 @@ import {
   searchOf,
   subtitleUrlOf,
   videoIdOf,
+  wholeAudioUrlOf,
   youtubeTracksOf,
 } from './youtube'
 import type { YoutubeListing, YoutubeVideo } from './youtube'
@@ -351,7 +352,7 @@ async function prepareVideo($: EngineInterface, config: Config, track: MusicTrac
   const subtitle = subtitleUrlOf(video, await localeFor($))
   const synced = subtitle ? await $.http.fetch(subtitle).then(answer => (answer.ok ? answer.text : ''), () => '') : ''
   return {
-    source: video.url,
+    source: wholeAudioUrlOf(video.url, video.filesize),
     sung: { trackId: track.id, cues: parseSrt(synced), stanzas: [] },
     durationMs: durationMsOf(video.duration),
   }

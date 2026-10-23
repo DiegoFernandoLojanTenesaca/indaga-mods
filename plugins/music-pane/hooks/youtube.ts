@@ -21,7 +21,15 @@ export type YoutubeListing = YoutubeEntry & {
 export type YoutubeVideo = {
   url?: string
   duration?: number | null
+  filesize?: number | null
   subtitles?: Record<string, { ext?: string; url?: string }[]>
+}
+
+const WHOLE_RANGE_LIMIT = 10 * 1024 * 1024
+
+export function wholeAudioUrlOf(url: string, size: number | null | undefined) {
+  const bytes = size ?? Number(new URL(url).searchParams.get('clen'))
+  return bytes > 0 && bytes <= WHOLE_RANGE_LIMIT ? `${url}&range=0-${bytes - 1}` : url
 }
 
 export function isYoutubeLink(text: string) {

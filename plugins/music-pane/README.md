@@ -73,7 +73,7 @@ Each subfolder of `library` is an album. A song is an audio file (`.mp3`, `.flac
 
 ## YouTube
 
-The playlists of `channel` show as albums next to the local ones. A video plays its audio, with its uploaded subtitles as the synced lyrics and its thumbnail as the cover. Starting a YouTube song takes a few seconds while yt-dlp reads it.
+The playlists of `channel` show as albums next to the local ones. A video plays its audio, with its uploaded subtitles as the synced lyrics and its thumbnail as the cover. Starting a YouTube song takes a few seconds while yt-dlp reads it. A song of up to 10 MB (about ten minutes) is asked of YouTube whole, in one piece: it arrives in under a second and the network stays quiet while it plays, which helps Bluetooth headphones that share their radio with a 2.4 GHz Wi-Fi. A longer one streams as it plays.
 
 ## The pane
 
