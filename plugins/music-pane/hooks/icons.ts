@@ -1,9 +1,9 @@
 export const ICONS = {
-  previous: '⏴⏴',
-  play: '⏵',
-  pause: '❚❚',
+  previous: '◄◄',
+  play: '►',
+  pause: '▌▌',
   stop: '■',
-  next: '⏵⏵',
+  next: '►►',
   playing: '♪',
   quieter: '−',
   louder: '+',

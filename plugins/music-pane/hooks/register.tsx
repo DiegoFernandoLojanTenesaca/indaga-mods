@@ -890,7 +890,11 @@ export const register: Register = (on, options) => {
                   <Text bold>{splitTitle(track.title).name}</Text>
                   <Text dimColor>{subLine()}</Text>
                 </Box>
-                {link && <Link href={link} label={t('youtube')} />}
+                {link && (
+                  <Box flexShrink={0}>
+                    <Link href={link} label={t('youtube')} />
+                  </Box>
+                )}
               </Box>
               {now.isLoading ? <Text dimColor>{t('loading')}</Text> : progress}
               <Box flexDirection="row" justifyContent="space-between">
@@ -909,10 +913,14 @@ export const register: Register = (on, options) => {
                 <Button key="next" label={ICONS.next} onPress={() => skip($, config, 1)} />
                 <Button key="stop" label={ICONS.stop} onPress={() => stop($)} />
               </Box>
-              <Box flexDirection="row" alignItems="center" gap={LAYOUT.buttonGap}>
-                <Text dimColor>{t('volumeLabel')}</Text>
+              <Box flexDirection="row" flexWrap="wrap" justifyContent="center" alignItems="center" gap={LAYOUT.buttonGap}>
+                <Box flexShrink={0}>
+                  <Text dimColor>{t('volumeLabel')}</Text>
+                </Box>
                 {volumeControl()}
-                <Text dimColor>{t('volume', { level: String(level) })}</Text>
+                <Box flexShrink={0}>
+                  <Text dimColor>{t('volume', { level: String(level) })}</Text>
+                </Box>
               </Box>
               <Button key="radio" plain onPress={() => toggleRadio($)}>
                 {follows ? <Text color={accent}>{t('radioOn')}</Text> : <Text dimColor>{t('radioOff')}</Text>}
